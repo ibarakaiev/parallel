@@ -48,6 +48,9 @@ class AnthropicProvider(LLMProvider):
                 "stream": True,
             }
             
+            input_tokens = 0
+            output_tokens = 0
+            
             async with session.post(api_url, json=payload, headers=headers) as response:
                 response.raise_for_status()
                 async for line in response.content:
@@ -61,12 +64,44 @@ class AnthropicProvider(LLMProvider):
                     
                     try:
                         event = json.loads(data)
+                        
+                        # Extract token usage from message_start event
+                        if event.get("type") == "message_start" and "message" in event:
+                            if "usage" in event["message"]:
+                                input_tokens = event["message"]["usage"].get("input_tokens", 0)
+                        
+                        # Extract token usage from message_delta event
+                        if event.get("type") == "message_delta" and "usage" in event["delta"]:
+                            output_tokens_delta = event["delta"]["usage"].get("output_tokens", 0)
+                            if output_tokens_delta > output_tokens:
+                                output_tokens = output_tokens_delta
+                                
+                        # Extract content delta
                         if event.get("type") == "content_block_delta" and "delta" in event:
                             text = event["delta"].get("text", "")
                             if text:
-                                yield {"content": text}
+                                yield {
+                                    "content": text,
+                                    "input_tokens": input_tokens,
+                                    "output_tokens": output_tokens
+                                }
+                                
+                        # Handle message_stop event to capture final output tokens
+                        if event.get("type") == "message_stop" and "usage" in event:
+                            final_output_tokens = event["usage"].get("output_tokens", 0)
+                            if final_output_tokens > output_tokens:
+                                output_tokens = final_output_tokens
+                                
                     except json.JSONDecodeError:
                         continue
+            
+            # Final yield to provide token usage
+            yield {
+                "content": "",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "final": True
+            }
         
     async def generate_completion_sync(self, messages: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
         """Implementation of non-streaming completion for Anthropic"""
@@ -76,8 +111,12 @@ class AnthropicProvider(LLMProvider):
             messages=messages,
         )
         
-        # Extract response text
-        return {"content": response.content[0].text}
+        # Extract response text and token usage
+        return {
+            "content": response.content[0].text,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens
+        }
 
 class TaskDecomposer:
     """Handles decomposition of queries into parallel tasks"""
@@ -98,6 +137,10 @@ class TaskDecomposer:
         
         decomposition_result = response["content"]
         
+        # Extract token usage
+        input_tokens = response.get("input_tokens", 0)
+        output_tokens = response.get("output_tokens", 0)
+        
         # Parse the decomposition result using regex
         import re
         decomposition_summary = re.search(r'DECOMPOSITION_SUMMARY:(.*?)(?:PARALLEL_TASKS_COUNT:|$)', decomposition_result, re.DOTALL)
@@ -106,7 +149,9 @@ class TaskDecomposer:
         if not (decomposition_summary and tasks_count):
             return {
                 "tasks": [{"subject": "Default", "prompt": query}],
-                "summary": "Unable to decompose query"
+                "summary": "Unable to decompose query",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
             }
         
         count = min(int(tasks_count.group(1)), max_tasks)  # Ensure we don't exceed max
@@ -131,12 +176,16 @@ class TaskDecomposer:
         if len(tasks) != count:
             return {
                 "tasks": [{"subject": "Default", "prompt": query}],
-                "summary": "Unable to properly decompose query"
+                "summary": "Unable to properly decompose query",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
             }
             
         return {
             "tasks": tasks,
-            "summary": decomposition_summary.group(1).strip() if decomposition_summary else ""
+            "summary": decomposition_summary.group(1).strip() if decomposition_summary else "",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
 
 class SynthesisGenerator:
@@ -146,7 +195,7 @@ class SynthesisGenerator:
         self.llm_provider = llm_provider
         self.prompt_template = prompt_template
     
-    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> AsyncIterator[str]:
+    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> AsyncIterator[Dict[str, Any]]:
         """Generate a synthesized response from multiple task results with streaming"""
         # Format the synthesis prompt
         task_results_text = ""
@@ -160,9 +209,24 @@ class SynthesisGenerator:
             task_results=task_results_text
         )
         
+        # Track token usage
+        input_tokens = 0
+        output_tokens = 0
+        
         # Call LLM for synthesis with streaming
         async for chunk in self.llm_provider.generate_completion([
             {"role": "user", "content": synthesis_prompt}
         ], stream=True):
+            # Track token usage
+            if "input_tokens" in chunk:
+                input_tokens = chunk["input_tokens"]
+            if "output_tokens" in chunk:
+                output_tokens = chunk["output_tokens"]
+                
+            # Pass along content with token usage
             if "content" in chunk:
-                yield chunk["content"]
+                yield {
+                    "content": chunk["content"],
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens
+                }

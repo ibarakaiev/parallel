@@ -119,8 +119,8 @@ async def messages_endpoint(request: Request):
                     "model": model,
                     "stop_reason": "end_turn",
                     "usage": {
-                        "input_tokens": 0,  # We don't track these yet
-                        "output_tokens": 0
+                        "input_tokens": result["input_tokens"],
+                        "output_tokens": result["output_tokens"]
                     }
                 },
                 headers={"Access-Control-Allow-Origin": "*"}

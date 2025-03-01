@@ -25,6 +25,10 @@ class ParallelChatService:
         """Process a query with potential parallelization"""
         sequence_id = generate_id()
         
+        # Initialize token counters
+        total_input_tokens = 0
+        total_output_tokens = 0
+        
         # Extract user query from messages
         user_query = next((msg["content"] for msg in reversed(messages) 
                         if msg["role"] == "user"), None)
@@ -47,6 +51,13 @@ class ParallelChatService:
             decomposition_result = await self.decomposer.decompose_query(
                 user_query, max_tasks=self.max_parallel_tasks
             )
+            
+            # If decomposition response has token counts, add them to totals
+            if isinstance(decomposition_result, dict):
+                if "input_tokens" in decomposition_result:
+                    total_input_tokens += decomposition_result.get("input_tokens", 0)
+                if "output_tokens" in decomposition_result:
+                    total_output_tokens += decomposition_result.get("output_tokens", 0)
             
             tasks = decomposition_result["tasks"]
             summary = decomposition_result["summary"]
@@ -99,16 +110,29 @@ class ParallelChatService:
             # Wait for all tasks to complete
             await asyncio.gather(*tasks_to_run)
             
+            # Add up token counts from all tasks
+            for result in task_results:
+                if "input_tokens" in result:
+                    total_input_tokens += result.get("input_tokens", 0)
+                if "output_tokens" in result:
+                    total_output_tokens += result.get("output_tokens", 0)
+            
             # STEP 3: "FINAL RESPONSE" - Generate a synthesized response
             # Generate the final response by synthesizing all the completed task results
+            synthesis_tokens = {"input_tokens": 0, "output_tokens": 0}
+            
             if task_count > 1:
                 # This will now stream the response directly as chunks
-                await self._generate_final_response(
+                synthesis_tokens = await self._generate_final_response(
                     sequence_id=sequence_id,
                     user_query=user_query,
                     task_results=task_results,
                     task_subjects=task_subjects
                 )
+                
+                # Add synthesis tokens to totals
+                total_input_tokens += synthesis_tokens.get("input_tokens", 0)
+                total_output_tokens += synthesis_tokens.get("output_tokens", 0)
             else:
                 # If there's only one task, use its result as the final response
                 # Stream it as a single chunk
@@ -130,11 +154,18 @@ class ParallelChatService:
                     metadata={"is_final_response": True}
                 ))
             
-            # Send completion event
+            # Send completion event with token usage
             await self.transport.send_event(StreamEvent(
                 event_type=StreamEventType.METADATA,
                 sequence_id=sequence_id,
-                metadata={"status": "all_complete", "task_count": task_count}
+                metadata={
+                    "status": "all_complete", 
+                    "task_count": task_count,
+                    "usage": {
+                        "input_tokens": total_input_tokens,
+                        "output_tokens": total_output_tokens
+                    }
+                }
             ))
             
             # Close the transport
@@ -168,12 +199,21 @@ class ParallelChatService:
             ))
             
             full_content = ""
+            input_tokens = 0
+            output_tokens = 0
             
             # Generate streaming completion
             async for chunk in self.llm_provider.generate_completion(
                 messages=messages,
                 stream=True
             ):
+                # Track token usage
+                if "input_tokens" in chunk:
+                    input_tokens = chunk["input_tokens"]
+                if "output_tokens" in chunk:
+                    output_tokens = chunk["output_tokens"]
+                    
+                # Handle content chunks
                 if "content" in chunk and chunk["content"]:
                     text = chunk["content"]
                     full_content += text
@@ -201,7 +241,11 @@ class ParallelChatService:
                     "subject": subject,
                     "task_index": task_index,
                     "thinking_step": 2,
-                    "subtask": True
+                    "subtask": True,
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens
+                    }
                 }
             ))
             
@@ -209,7 +253,9 @@ class ParallelChatService:
             task_results.append({
                 "subject": subject,
                 "content": full_content,
-                "task_index": task_index
+                "task_index": task_index,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
             })
             
         except Exception as e:
@@ -224,8 +270,11 @@ class ParallelChatService:
                                      sequence_id: str,
                                      user_query: str,
                                      task_results: List[Dict[str, Any]],
-                                     task_subjects: List[str]) -> None:
+                                     task_subjects: List[str]) -> Dict[str, int]:
         """Generate a final synthesized response from all the parallel task results with streaming"""
+        input_tokens = 0
+        output_tokens = 0
+        
         try:
             # Sort results by task_index to ensure correct order
             sorted_results = sorted(task_results, key=lambda x: x["task_index"])
@@ -244,16 +293,25 @@ class ParallelChatService:
                 user_query=user_query,
                 task_results=sorted_results
             ):
+                # Track token usage if available
+                if isinstance(chunk, dict):
+                    if "input_tokens" in chunk:
+                        input_tokens = chunk.get("input_tokens", 0)
+                    if "output_tokens" in chunk:
+                        output_tokens = chunk.get("output_tokens", 0)
+                    if "content" in chunk:
+                        chunk = chunk["content"]
+                
                 # Stream each chunk as a content chunk
                 await self.transport.send_event(StreamEvent(
                     event_type=StreamEventType.CONTENT_CHUNK,
                     sequence_id=sequence_id,
-                    content=chunk,
+                    content=chunk if isinstance(chunk, str) else "",
                     metadata={"is_final_response": True}
                 ))
             
-            # No need to return anything since we've streamed everything
-            return ""
+            # Return token usage for the synthesis
+            return {"input_tokens": input_tokens, "output_tokens": output_tokens}
             
         except Exception as e:
             # If synthesis fails, create a simple synthesis ourselves
@@ -278,7 +336,8 @@ class ParallelChatService:
                 metadata={"is_final_response": True}
             ))
             
-            return ""
+            # Return empty token usage for the fallback
+            return {"input_tokens": 0, "output_tokens": 0}
     
     async def _send_error(self, 
                          sequence_id: str, 
