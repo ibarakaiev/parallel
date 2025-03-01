@@ -649,7 +649,7 @@ export default function ChatPage() {
       {/* Sidebar */}
       <div className="w-64 border-r border-accent-200 dark:border-accent-300 bg-white dark:bg-background-secondary hidden sm:block">
         <div className="h-14 border-b border-accent-200 dark:border-accent-300 px-4 flex items-center">
-          <h1 className="text-lg font-medium text-accent-900 dark:text-accent-900 font-sans">
+          <h1 className="text-lg font-bold text-accent-900 dark:text-accent-900 font-serif">
             Parallel
           </h1>
         </div>
@@ -723,9 +723,6 @@ export default function ChatPage() {
                 />
               </svg>
             </button>
-            <h2 className="text-sm font-medium text-accent-900 dark:text-accent-900 font-serif">
-              Chat Assistant
-            </h2>
           </div>
 
           <div className="flex items-center gap-2">

@@ -165,4 +165,16 @@ body {
            focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500
            dark:border-accent-200 dark:bg-accent-50 dark:text-accent-800 dark:placeholder:text-accent-500;
   }
+
+  /* Fade in animation for incoming tokens from the server */
+  @keyframes fadeInToken {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Animation class for new content */
+  .animate-fadeIn {
+    opacity: 0;
+    animation: fadeInToken 0.5s ease-in-out forwards;
+  }
 }

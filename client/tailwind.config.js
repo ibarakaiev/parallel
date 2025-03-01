@@ -43,6 +43,7 @@ module.exports = {
         md: "8px",
         lg: "12px",
       },
+      // Removed custom animations as they're now in globals.css
     },
   },
   plugins: [],
