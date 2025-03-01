@@ -10,12 +10,27 @@ import { ReactNode } from "react";
 
 const MarkdownComponents = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  p: ({ children, ...props }: any) => <p className="my-1" {...props} />,
+  p: ({ children, ...props }: any) => <p className="my-1" {...props}>{children}</p>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pre: ({ ...props }: any) => <pre className="my-2" {...props} />,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   code: ({ inline, ...props }: { inline?: boolean; [key: string]: any }) =>
     inline ? <code {...props} /> : <code className="block p-2" {...props} />,
+  // Add support for headers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  h1: ({ children, ...props }: any) => <h1 className="text-2xl font-bold mt-4 mb-2" {...props}>{children}</h1>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  h2: ({ children, ...props }: any) => <h2 className="text-xl font-bold mt-3 mb-2" {...props}>{children}</h2>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  h3: ({ children, ...props }: any) => <h3 className="text-lg font-bold mt-2 mb-1" {...props}>{children}</h3>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ul: ({ children, ...props }: any) => <ul className="list-disc pl-5 my-2" {...props}>{children}</ul>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ol: ({ children, ...props }: any) => <ol className="list-decimal pl-5 my-2" {...props}>{children}</ol>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  li: ({ children, ...props }: any) => <li className="my-1" {...props}>{children}</li>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  blockquote: ({ children, ...props }: any) => <blockquote className="border-l-4 border-accent-300 pl-4 my-2 italic" {...props}>{children}</blockquote>,
 };
 
 export default function ChatInterface({
@@ -188,9 +203,31 @@ export default function ChatInterface({
                             ) : (streamingMessages && streamingMessages.thinking) ? (
                               <div>
                                 {streamingMessages.thinking}
+                                <div className="flex items-center gap-2 mt-2">
+                                  <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
+                                  <div
+                                    className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                    style={{ animationDelay: "0.2s" }}
+                                  ></div>
+                                  <div
+                                    className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                    style={{ animationDelay: "0.4s" }}
+                                  ></div>
+                                </div>
                               </div>
                             ) : (
-                              <div>Analyzing your query...</div>
+                              <div className="flex items-center gap-2">
+                                <span>Decomposing query</span>
+                                <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
+                                <div
+                                  className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                  style={{ animationDelay: "0.2s" }}
+                                ></div>
+                                <div
+                                  className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                  style={{ animationDelay: "0.4s" }}
+                                ></div>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -209,6 +246,8 @@ export default function ChatInterface({
                                   style={{ animationDelay: `${idx * 100}ms` }}
                                 >
                                   {subject}
+                                  {/* Small dot to indicate running task - only show when loading */}
+                                  {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
                                 </div>
                               ))}
                             </div>
@@ -220,13 +259,14 @@ export default function ChatInterface({
 
                 {/* Show the final response streaming if available - this is the main content */}
                 {streamingMessages && streamingMessages.final_response ? (
-                  <div className="text-base leading-relaxed font-serif markdown-content">
-                    <div>
+                  <div className="text-base leading-relaxed font-serif prose prose-headings:font-serif prose-headings:text-accent-900 prose-p:text-accent-900 prose-a:text-blue-600 prose-strong:text-accent-900 prose-ul:text-accent-900 prose-ol:text-accent-900 max-w-none">
+                    {/* Use ReactMarkdown to properly render the markdown */}
+                    <ReactMarkdown components={MarkdownComponents}>
                       {streamingMessages.final_response}
-                    </div>
+                    </ReactMarkdown>
                   </div>
                 ) : (
-                  /* Loading indicator */
+                  /* Loading indicator - only show dots, no text */
                   loading && (
                     <div className="flex items-center gap-2 py-1">
                       <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
@@ -309,8 +349,8 @@ export default function ChatInterface({
                                   className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn"
                                 >
                                   {subject}
-                                  {/* Small dot to indicate running task */}
-                                  <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                  {/* Small dot to indicate running task - only show when loading or decomposing */}
+                                  {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
                                 </div>
                               ))}
                             </div>
@@ -322,9 +362,6 @@ export default function ChatInterface({
                 )}
 
                 <div className="flex flex-col gap-2 animate-fadeIn">
-                  <div className="text-base text-accent-700 dark:text-accent-700 mb-1 font-serif">
-                    Analyzing and decomposing your query...
-                  </div>
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
                     <div
@@ -336,12 +373,6 @@ export default function ChatInterface({
                       style={{ animationDelay: "0.4s" }}
                     ></div>
                   </div>
-                  {/* Show this only if no reasoningMessages but decomposing is true */}
-                  {!reasoningMessages.length && (
-                    <div className="text-sm text-accent-700 dark:text-accent-700 mt-2">
-                      Breaking down your query into subtasks...
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -415,8 +446,8 @@ export default function ChatInterface({
                                     className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn"
                                   >
                                     {subject}
-                                    {/* Small dot to indicate running task */}
-                                    <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                    {/* Small dot to indicate running task - only show when loading */}
+                                    {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
                                   </div>
                                 ))}
                               </div>
