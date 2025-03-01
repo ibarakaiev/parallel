@@ -8,13 +8,13 @@ import { Message, WebSocketMessage } from "./types";
 const MAX_CONCURRENT_CHATS = 4;
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hello! How can I help you today?" },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [decomposing, setDecomposing] = useState(false);
   const [streamingMessages, setStreamingMessages] = useState<
     Record<number, string>
   >({});
+  const [taskSubjects, setTaskSubjects] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [numParallelChats, setNumParallelChats] = useState(1);
 
@@ -61,14 +61,26 @@ export default function ChatPage() {
           console.log("Parsed WebSocket message:", data);
 
           switch (data.type) {
+            case "decomposition_start":
+              console.log("Decomposing query:", data.message);
+              setDecomposing(true);
+              break;
+              
             case "batch_start":
-              console.log(`Starting batch of ${data.count} parallel chats`);
+              console.log(`Starting batch of ${data.count} parallel chats with subjects:`, data.subjects);
+              // Set the number of parallel chats based on the decomposition
+              setNumParallelChats(data.count || 1);
+              // Save the task subjects
+              setTaskSubjects(data.subjects || []);
+              
               // Initialize UI grid with empty slots for all chats
               const initialStreamingMessages: Record<number, string> = {};
               for (let i = 0; i < data.count!; i++) {
                 initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
               }
               setStreamingMessages(initialStreamingMessages);
+              // End the decomposing state
+              setDecomposing(false);
 
               // Clear any previous completed messages with chat_id
               setMessages((prev) =>
@@ -80,7 +92,16 @@ export default function ChatPage() {
               break;
 
             case "stream_start":
-              console.log(`Stream ${data.chat_id} started`);
+              console.log(`Stream ${data.chat_id} started for subject: ${data.subject || 'unknown'}`);
+              // If we received a subject, add it to the taskSubjects array
+              if (data.subject && data.chat_id !== undefined) {
+                setTaskSubjects(prev => {
+                  const newSubjects = [...prev];
+                  newSubjects[data.chat_id!] = data.subject!;
+                  return newSubjects;
+                });
+              }
+              
               // Initialize streaming message for this chat
               if (data.chat_id !== undefined) {
                 setStreamingMessages((prev) => ({
@@ -108,13 +129,20 @@ export default function ChatPage() {
               break;
 
             case "stream_end":
-              console.log(`Stream ${data.chat_id} ended`);
+              console.log(`Stream ${data.chat_id} ended for subject: ${data.subject || 'unknown'}`);
               // Streaming ended, add the complete message
               if (data.content && data.chat_id !== undefined) {
+                // Get subject from message or from taskSubjects array if available
+                let subject = data.subject;
+                if (!subject && data.chat_id < taskSubjects.length) {
+                  subject = taskSubjects[data.chat_id];
+                }
+                
                 const newAssistantMessage: Message = {
                   role: "assistant",
                   content: data.content,
                   chat_id: data.chat_id,
+                  subject: subject
                 };
                 setMessages((prev) => [...prev, newAssistantMessage]);
 
@@ -150,6 +178,9 @@ export default function ChatPage() {
                   return newState;
                 });
               }
+
+              // End the decomposing state if it was active
+              setDecomposing(false);
 
               // If this was the last active chat or a general error, set loading to false
               if (
@@ -188,14 +219,8 @@ export default function ChatPage() {
     };
   }, []);
 
-  const handleSendMessage = async (message: string, n: number = 1) => {
+  const handleSendMessage = async (message: string) => {
     if (!message.trim() || loading) return;
-
-    // Ensure n is within allowed range
-    n = Math.min(Math.max(1, n), MAX_CONCURRENT_CHATS);
-
-    // Store n value for the UI
-    setNumParallelChats(n);
 
     // Add user message to state
     const newUserMessage: Message = { role: "user", content: message };
@@ -208,12 +233,11 @@ export default function ChatPage() {
     try {
       // Use WebSocket if connected, otherwise fall back to fetch API
       if (connected && socketRef.current?.readyState === WebSocket.OPEN) {
-        // Send message through WebSocket with n parameter
+        // Send message through WebSocket (no n parameter - it's determined by the backend)
         const updatedMessages = [...messages, newUserMessage];
         socketRef.current.send(
           JSON.stringify({
-            messages: updatedMessages,
-            n: n,
+            messages: updatedMessages
           }),
         );
       } else {
@@ -226,8 +250,7 @@ export default function ChatPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            messages: updatedMessages,
-            n: n,
+            messages: updatedMessages
           }),
           mode: "cors",
           credentials: "omit",
@@ -361,27 +384,13 @@ export default function ChatPage() {
             >
               {connected ? "WebSocket Connected" : "WebSocket Disconnected"}
             </div>
-
-            {/* Parallel chats selector */}
-            <div className="ml-2 flex items-center space-x-2">
-              <label
-                htmlFor="parallelChats"
-                className="text-xs text-accent-900 dark:text-accent-900 font-serif"
-              >
-                Parallel:
-              </label>
-              <select
-                id="parallelChats"
-                value={numParallelChats}
-                onChange={(e) => setNumParallelChats(Number(e.target.value))}
-                className="text-xs font-serif bg-white dark:bg-background-secondary border border-accent-300 dark:border-accent-300 rounded px-2 py-1 text-accent-900 dark:text-accent-900"
-              >
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-              </select>
-            </div>
+            
+            {/* Auto-decomposition status badge */}
+            {numParallelChats > 1 && (
+              <div className="px-2 py-0.5 text-xs rounded-full font-serif bg-accent-100 text-accent-800 dark:bg-accent-200 dark:text-accent-800">
+                {numParallelChats} parallel angles
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -424,7 +433,9 @@ export default function ChatPage() {
           loading={loading}
           streamingMessages={streamingMessages}
           numParallelChats={numParallelChats}
-          onSendMessage={(msg) => handleSendMessage(msg, numParallelChats)}
+          onSendMessage={handleSendMessage}
+          decomposing={decomposing}
+          taskSubjects={taskSubjects}
         />
       </div>
     </div>

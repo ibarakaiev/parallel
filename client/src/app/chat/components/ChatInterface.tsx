@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChatInterfaceProps, Message } from "../types";
+import ReactMarkdown from "react-markdown";
 
 export default function ChatInterface({
   messages,
@@ -9,6 +10,8 @@ export default function ChatInterface({
   streamingMessages,
   numParallelChats,
   onSendMessage,
+  decomposing = false,
+  taskSubjects = [],
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -31,7 +34,7 @@ export default function ChatInterface({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !loading) {
-      onSendMessage(input, numParallelChats);
+      onSendMessage(input);
       setInput("");
       // Reset textarea height
       if (textareaRef.current) {
@@ -40,36 +43,37 @@ export default function ChatInterface({
     }
   };
 
-  // Group messages by chat_id
+  // Group and order messages for display
   const getMessagesByChat = () => {
-    const userMessages = messages.filter((msg) => msg.role === "user");
-    const assistantMessages = messages.filter(
-      (msg) => msg.role === "assistant",
+    // Arrange messages in chronological order
+    // Order: Initial greeting -> user message -> all assistant responses (parallel or single)
+    
+    // Find the initial greeting message
+    const initialMessages = messages.filter((msg) => 
+      msg.role === "assistant" && msg.chat_id === undefined && !messages.find((m) => m.role === "user")
     );
-
+    
     // Get the last user message
-    const lastUserMessage =
-      userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
-
-    // Get all assistant messages that match the appropriate chat_id
-    // For backward compatibility, include messages without chat_id
-    const relevantAssistantMessages = assistantMessages.filter(
-      (msg) =>
-        // Include the messages that:
-        // 1. Have no chat_id (old format)
-        // 2. Have a chat_id less than numParallelChats (for current batch)
-        msg.chat_id === undefined ||
-        (msg.chat_id >= 0 && msg.chat_id < numParallelChats),
+    const userMessages = messages.filter((msg) => msg.role === "user");
+    const lastUserMessage = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+    
+    // Get assistant responses to the last user message
+    const assistantResponses = messages.filter((msg) => 
+      msg.role === "assistant" && 
+      (msg.chat_id !== undefined || // Parallel responses have chat_id
+       (msg.chat_id === undefined && // Single response might not have chat_id
+        userMessages.length > 0 && 
+        messages.indexOf(msg) > messages.indexOf(userMessages[userMessages.length - 1])))
     );
-
-    // Combine messages for display
-    return lastUserMessage
-      ? [
-          ...relevantAssistantMessages.filter((m) => !m.chat_id),
-          lastUserMessage,
-          ...relevantAssistantMessages.filter((m) => m.chat_id !== undefined),
-        ]
-      : relevantAssistantMessages;
+    
+    // Build the final array in the correct order
+    const orderedMessages = [
+      ...initialMessages, // Initial greeting
+      lastUserMessage, // User question
+      ...assistantResponses // All assistant responses
+    ].filter(Boolean); // Remove null entries
+    
+    return orderedMessages;
   };
 
   return (
@@ -77,48 +81,44 @@ export default function ChatInterface({
       {/* Messages container */}
       <div className="flex-1 overflow-y-auto py-6 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto space-y-4">
-          {/* User message */}
+          {/* All messages in sequence (greeting, user message, single-chat responses) */}
           <div className="space-y-4">
-            {messages
-              .filter((m) => m.role === "user")
-              .slice(-1)
+            {getMessagesByChat()
+              .filter(m => {
+                // Show all messages if we're in single chat mode
+                if (numParallelChats === 1) return true;
+                // Otherwise only show messages without chat_id
+                return m.chat_id === undefined;
+              })
               .map((message, index) => (
-                <MessageComponent key={`user-${index}`} message={message} />
+                <MessageComponent key={`message-${index}`} message={message} />
               ))}
           </div>
 
           {/* Parallel streaming messages in a grid */}
           {numParallelChats > 1 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {Array.from({ length: numParallelChats }).map((_, idx) => {
                 const content = streamingMessages[idx] || null;
                 // Check if there's a completed message for this chat_id
+                // Find the completed message for this chat_id
                 const completedMessage = messages.find(
                   (m) =>
                     m.role === "assistant" &&
-                    m.chat_id === idx &&
-                    // Only consider recent messages (those after the last user message)
-                    messages.findIndex(
-                      (m) =>
-                        m ===
-                        messages.filter((m) => m.role === "user").slice(-1)[0],
-                    ) <
-                      messages.findIndex(
-                        (m) => m.role === "assistant" && m.chat_id === idx,
-                      ),
+                    m.chat_id === idx
                 );
 
                 // If there's a completed message and no streaming content, show the completed message
                 if (completedMessage && content === null) {
                   return (
                     <div key={`completed-${idx}`} className="flex flex-col">
-                      <div className="text-xs text-gray-500 dark:text-gray-400 font-semibold mb-1">
-                        Chat {idx + 1}
+                      <div className="text-sm text-gray-500 dark:text-gray-400 font-semibold mb-1">
+                        {completedMessage.subject || `Chat ${idx + 1}`}
                       </div>
                       <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm flex-1 border border-accent-200 dark:border-accent-300">
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed font-serif">
-                          {completedMessage.content}
-                        </p>
+                        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
+                          <ReactMarkdown>{completedMessage.content}</ReactMarkdown>
+                        </div>
                       </div>
                     </div>
                   );
@@ -130,15 +130,17 @@ export default function ChatInterface({
                     key={`stream-container-${idx}`}
                     className="flex flex-col"
                   >
-                    <div className="text-xs text-gray-500 dark:text-gray-400 font-semibold mb-1">
-                      Chat {idx + 1}
+                    <div className="text-sm text-gray-500 dark:text-gray-400 font-semibold mb-1">
+                      {/* Use taskSubjects if available, otherwise fall back to finding the subject in messages */}
+                      {taskSubjects && idx < taskSubjects.length ? taskSubjects[idx] : 
+                       messages.find(m => m.role === "assistant" && m.chat_id === idx)?.subject || `Chat ${idx + 1}`}
                     </div>
                     <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm flex-1 border border-accent-200 dark:border-accent-300">
                       {content !== null ? (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed font-serif">
-                          {content}
+                        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
+                          <ReactMarkdown>{content}</ReactMarkdown>
                           <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
-                        </p>
+                        </div>
                       ) : (
                         <div className="flex items-center justify-center h-full min-h-[100px]">
                           <div className="flex items-center gap-2">
@@ -161,29 +163,50 @@ export default function ChatInterface({
             </div>
           )}
 
-          {/* Single streaming message (for backward compatibility) */}
+          {/* Single streaming message */}
           {numParallelChats === 1 &&
             Object.keys(streamingMessages).length > 0 && (
               <div className="flex justify-start">
                 <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed font-serif">
-                    {streamingMessages[0] || ""}
+                  {taskSubjects && taskSubjects[0] && (
+                    <div className="mb-1 text-sm text-accent-700 dark:text-accent-700 font-semibold">
+                      {taskSubjects[0]}
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
+                    <ReactMarkdown>{streamingMessages[0] || ""}</ReactMarkdown>
                     <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
-                  </p>
+                  </div>
                 </div>
               </div>
             )}
 
-          {/* Show original single-chat interface for backward compatibility */}
-          {numParallelChats === 1 &&
-            messages
-              .filter((m) => m.role === "assistant" && m.chat_id === undefined)
-              .map((message, index) => (
-                <MessageComponent key={`legacy-${index}`} message={message} />
-              ))}
-
-          {/* Loading indicator (only shown when not streaming) */}
-          {loading && Object.keys(streamingMessages).length === 0 && (
+          {/* Decomposition indicator */}
+          {decomposing && (
+            <div className="flex justify-start">
+              <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
+                <div className="flex flex-col gap-2">
+                  <div className="text-base text-accent-700 dark:text-accent-700 mb-1 font-serif">
+                    Analyzing and decomposing your query...
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
+                    <div
+                      className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
+                      style={{ animationDelay: "0.2s" }}
+                    ></div>
+                    <div
+                      className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
+                      style={{ animationDelay: "0.4s" }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Loading indicator (only shown when not streaming and not decomposing) */}
+          {loading && !decomposing && Object.keys(streamingMessages).length === 0 && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
                 <div className="flex items-center gap-2">
@@ -213,8 +236,8 @@ export default function ChatInterface({
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={`Type a message... (Will generate ${numParallelChats} response${numParallelChats > 1 ? "s" : ""})`}
-              className="w-full py-3 pl-4 pr-16 bg-transparent outline-none resize-none min-h-[44px] max-h-[200px] text-accent-900 dark:text-accent-900 placeholder:text-accent-400 dark:placeholder:text-accent-500 text-sm font-serif"
+              placeholder="Type a message... (Your query will be auto-analyzed and decomposed)"
+              className="w-full py-3 pl-4 pr-16 bg-transparent outline-none resize-none min-h-[44px] max-h-[200px] text-accent-900 dark:text-accent-900 placeholder:text-accent-400 dark:placeholder:text-accent-500 text-base font-serif"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -254,7 +277,7 @@ export default function ChatInterface({
             </button>
           </div>
 
-          <div className="mt-2 text-xs text-accent-700 dark:text-accent-700 text-center">
+          <div className="mt-2 text-sm text-accent-700 dark:text-accent-700 text-center">
             Press{" "}
             <kbd className="px-1.5 py-0.5 bg-accent-50 dark:bg-accent-100 rounded border border-accent-200 dark:border-accent-300 text-accent-800 dark:text-accent-800 font-serif">
               Enter
@@ -284,13 +307,13 @@ function MessageComponent({ message }: { message: Message }) {
         }`}
       >
         {!isUser && message.chat_id !== undefined && (
-          <div className="mb-1 text-xs text-accent-700 dark:text-accent-700 font-semibold">
-            Chat {message.chat_id + 1}
+          <div className="mb-1 text-sm text-accent-700 dark:text-accent-700 font-semibold">
+            {message.subject ? message.subject : `Chat ${message.chat_id + 1}`}
           </div>
         )}
-        <p className="whitespace-pre-wrap text-sm leading-relaxed font-serif">
-          {message.content}
-        </p>
+        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
+          <ReactMarkdown>{message.content}</ReactMarkdown>
+        </div>
       </div>
     </div>
   );
