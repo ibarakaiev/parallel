@@ -133,7 +133,7 @@ export default function ChatInterface({
                         onClick={toggleReasoningExpanded}
                       >
                         <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
-                          <span className="font-medium text-sm">thinking</span>
+                          <span className="font-medium text-sm">reasoning</span>
                         </div>
                         <svg
                           width="16"
@@ -159,7 +159,6 @@ export default function ChatInterface({
                           {/* General reasoning plan */}
                           {reasoningMessages.length > 0 && reasoningMessages[0] && (
                             <div className="mb-3">
-                              <div className="text-sm font-medium mb-1">Reasoning</div>
                               <div className="text-sm text-accent-800 dark:text-accent-700">
                                 <ReactMarkdown components={MarkdownComponents}>
                                   {streamingMessages.thinking || reasoningMessages[0].content}
@@ -400,7 +399,7 @@ export default function ChatInterface({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message... (Your query will be auto-analyzed and decomposed)"
-              className="w-full py-3 pl-4 pr-16 bg-transparent outline-none resize-none min-h-[44px] max-h-[200px] text-accent-900 dark:text-accent-900 placeholder:text-accent-400 dark:placeholder:text-accent-500 text-base font-serif"
+              className="w-full py-3 pl-4 pr-16 bg-transparent outline-none resize-none min-h-[44px] max-h-[200px] text-accent-900 dark:text-accent-900 placeholder:text-accent-400 dark:placeholder:text-accent-500 text-base font-sans"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -442,11 +441,11 @@ export default function ChatInterface({
 
           <div className="mt-2 text-sm text-accent-700 dark:text-accent-700 text-center">
             Press{" "}
-            <kbd className="px-1.5 py-0.5 bg-accent-50 dark:bg-accent-100 rounded border border-accent-200 dark:border-accent-300 text-accent-800 dark:text-accent-800 font-serif">
+            <kbd className="px-1.5 py-0.5 bg-accent-50 dark:bg-accent-100 rounded border border-accent-200 dark:border-accent-300 text-accent-800 dark:text-accent-800 font-sans">
               Enter
             </kbd>{" "}
             to send,{" "}
-            <kbd className="px-1.5 py-0.5 bg-accent-50 dark:bg-accent-100 rounded border border-accent-200 dark:border-accent-300 text-accent-800 dark:text-accent-800 font-serif">
+            <kbd className="px-1.5 py-0.5 bg-accent-50 dark:bg-accent-100 rounded border border-accent-200 dark:border-accent-300 text-accent-800 dark:text-accent-800 font-sans">
               Shift+Enter
             </kbd>{" "}
             for new line
@@ -477,10 +476,10 @@ function MessageComponent({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`p-4 rounded-lg shadow-sm w-full ${
+        className={`p-4 rounded-lg ${
           isUser
-            ? "bg-accent-600 text-white"
-            : "bg-white dark:bg-background-secondary text-accent-900 dark:text-accent-900 border border-accent-200 dark:border-accent-300"
+            ? "bg-gradient-to-b from-[#EFE9E5] to-accent-200 text-accent-900 font-sans text-sm font-medium md:w-11/12"
+            : "bg-white dark:bg-background-secondary text-accent-900 dark:text-accent-900 border border-accent-200 dark:border-accent-300 w-full"
         }`}
       >
         {!isUser && message.chat_id !== undefined && (
@@ -488,7 +487,7 @@ function MessageComponent({
             {message.subject ? message.subject : `Chat ${message.chat_id + 1}`}
           </div>
         )}
-        <div className="text-base leading-relaxed font-serif markdown-content">
+        <div className={`text-base leading-relaxed ${isUser ? '' : 'font-serif'} markdown-content`}>
           <ReactMarkdown components={MarkdownComponents}>{message.content}</ReactMarkdown>
         </div>
       </div>
