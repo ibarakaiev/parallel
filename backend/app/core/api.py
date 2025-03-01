@@ -146,8 +146,8 @@ class SynthesisGenerator:
         self.llm_provider = llm_provider
         self.prompt_template = prompt_template
     
-    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> str:
-        """Generate a synthesized response from multiple task results"""
+    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> AsyncIterator[str]:
+        """Generate a synthesized response from multiple task results with streaming"""
         # Format the synthesis prompt
         task_results_text = ""
         for i, result in enumerate(task_results):
@@ -160,9 +160,9 @@ class SynthesisGenerator:
             task_results=task_results_text
         )
         
-        # Call LLM for synthesis
-        response = await self.llm_provider.generate_completion_sync([
+        # Call LLM for synthesis with streaming
+        async for chunk in self.llm_provider.generate_completion([
             {"role": "user", "content": synthesis_prompt}
-        ])
-        
-        return response["content"]
+        ], stream=True):
+            if "content" in chunk:
+                yield chunk["content"]

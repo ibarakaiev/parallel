@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ChatInterface from "./components/ChatInterface";
-import { Message, WebSocketMessage } from "./types";
-
-// Maximum number of concurrent chats
-const MAX_CONCURRENT_CHATS = 4;
+import { Message } from "./types";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,7 +19,17 @@ export default function ChatPage() {
 
   // Debug streaming message changes
   useEffect(() => {
-    console.log("Streaming messages updated:", streamingMessages);
+    console.log("Streaming messages updated:", 
+      Object.keys(streamingMessages).map(key => 
+        key === 'final_response' 
+          ? `final_response: ${streamingMessages[key]?.substring(0, 30)}...` 
+          : `${key}: ${typeof streamingMessages[key] === 'string' ? streamingMessages[key]?.substring(0, 30) : '[object]'}`
+      )
+    );
+    
+    if (streamingMessages.final_response) {
+      console.log("Final response length:", streamingMessages.final_response.length);
+    }
   }, [streamingMessages]);
 
   // Initialize connection status
@@ -35,6 +42,7 @@ export default function ChatPage() {
   };
 
   // Handle processing SSE events
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const processSSEEvent = useCallback((eventData: any) => {
     try {
       console.log("SSE data received:", eventData);
@@ -46,13 +54,13 @@ export default function ChatPage() {
           // Check if this is a main thinking step or a subtask
           const thinkingStep = eventData.metadata?.thinking_step || 1;
           const isSubtask = eventData.metadata?.subtask || false;
-          const subject = eventData.metadata?.subject || "";
           
           if (thinkingStep === 1) {
             // This is the main decomposition step
             setDecomposing(true);
             
-            // Add this as a reasoning message
+            // Replace the initial reasoning message with the actual content
+            // from the server, so it continues streaming from here
             const reasoningMessage: Message = {
               role: "assistant",
               content: eventData.content || "Analyzing query...",
@@ -60,8 +68,15 @@ export default function ChatPage() {
               reasoning_step: thinkingStep,
               subject: "Query Analysis"
             };
-            // Only add to current reasoning for this request
-            setCurrentReasoningMessages(prev => [...prev, reasoningMessage]);
+            
+            // Replace the initial reasoning message
+            setCurrentReasoningMessages([reasoningMessage]);
+            
+            // Update the streaming content with the new data
+            setStreamingMessages(prev => ({
+              ...prev,
+              thinking: eventData.content || "Analyzing query..."
+            }));
           } else if (isSubtask) {
             // This is a parallel subtask
             // If this is the first subtask, clear previous reasoning messages for this step
@@ -83,8 +98,19 @@ export default function ChatPage() {
             }
             
             // Initialize a streaming message for this subtask
+            // This will make it show up immediately
             const taskIndex = eventData.metadata?.task_index;
+            const taskSubject = eventData.metadata?.subject || `Task ${taskIndex !== undefined ? taskIndex + 1 : ''}`;
+            
             if (taskIndex !== undefined) {
+              // Add the subtask subject to the task subjects
+              setTaskSubjects(prev => {
+                const newSubjects = [...prev];
+                newSubjects[taskIndex] = taskSubject;
+                return newSubjects;
+              });
+              
+              // Initialize the streaming message for this subtask
               setStreamingMessages(prev => ({
                 ...prev,
                 [taskIndex]: ""
@@ -106,7 +132,12 @@ export default function ChatPage() {
             const taskCount = eventData.metadata?.task_count || 1;
             const subjects = eventData.metadata?.task_subjects || [];
             setNumParallelChats(taskCount);
-            setTaskSubjects(subjects);
+            
+            // Only set task subjects if they haven't been set yet by individual 
+            // thinking_start events for each subtask
+            if (taskSubjects.length === 0) {
+              setTaskSubjects(subjects);
+            }
             
             // Update the reasoning message with the final content
             const updatedReasoningMessage: Message = {
@@ -127,11 +158,24 @@ export default function ChatPage() {
               )
             );
             
-            // Initialize UI grid with empty slots for all chats
-            const initialStreamingMessages: Record<number, string> = {};
+            // Only initialize chat slots that haven't already been created
+            // by individual thinking_start events
+            const existingKeys = Object.keys(streamingMessages)
+              .filter(key => key !== 'thinking')
+              .map(key => parseInt(key));
+              
+            const initialStreamingMessages: Record<number, string> = {...streamingMessages};
+            delete initialStreamingMessages.thinking; // Remove the thinking property
+            
+            // Create empty slots for missing tasks
             for (let i = 0; i < taskCount; i++) {
-              initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
+              if (!existingKeys.includes(i)) {
+                initialStreamingMessages[i] = ""; // Initialize slots that don't exist yet
+              }
             }
+            
+            // Keep the thinking property
+            initialStreamingMessages.thinking = streamingMessages.thinking;
             setStreamingMessages(initialStreamingMessages);
             
             // End the decomposing state
@@ -164,12 +208,9 @@ export default function ChatPage() {
               // Add only to current reasoning messages
               setCurrentReasoningMessages(prev => [...prev, subtaskReasoningMessage]);
               
-              // Clear streaming message for this task
-              setStreamingMessages(prev => {
-                const newState = { ...prev };
-                delete newState[taskIndex];
-                return newState;
-              });
+              // Don't clear streaming message for this task yet
+              // Keep it visible to preserve streaming appearance
+              // The final response will clear all streaming messages
             }
           }
           break;
@@ -178,48 +219,153 @@ export default function ChatPage() {
           // Handle content chunk for subtask reasoning
           const chatIndex = eventData.metadata?.task_index;
           const isReasoningChunk = eventData.metadata?.thinking_step !== undefined;
+          const thinkingChunk = eventData.metadata?.is_thinking;
           
-          if (eventData.content && chatIndex !== undefined) {
-            console.log(
-              `Chunk for ${isReasoningChunk ? 'reasoning' : 'response'} chat ${chatIndex} received:`,
-              eventData.content.substring(0, 20) + "...",
-            );
+          // Check if this is a final response chunk (the backend will mark these with is_final_response)
+          // This is VERY IMPORTANT for streaming the final synthesis!
+          const isFinalResponseChunk = eventData.metadata?.is_final_response === true;
+          
+          if (eventData.content) {
+            console.log('Content chunk metadata:', eventData.metadata, 'isFinalResponse:', isFinalResponseChunk);
             
-            // Append new content to streaming message for this chat
-            setStreamingMessages((prev) => {
-              const prevContent = prev[chatIndex] || "";
-              return {
-                ...prev,
-                [chatIndex]: prevContent + eventData.content,
-              };
-            });
+            if (thinkingChunk) {
+              // This is a chunk for the thinking/reasoning step
+              console.log('Thinking chunk received:', eventData.content.substring(0, 20) + "...");
+              
+              // Update the reasoning message content
+              setCurrentReasoningMessages(prev => {
+                // Find the first reasoning message and update it
+                if (prev.length > 0 && prev[0].is_reasoning) {
+                  const updatedMessages = [...prev];
+                  updatedMessages[0] = {
+                    ...updatedMessages[0],
+                    content: updatedMessages[0].content + eventData.content
+                  };
+                  return updatedMessages;
+                }
+                return prev;
+              });
+              
+              // Also update the streaming display for thinking
+              setStreamingMessages(prev => {
+                const prevThinking = prev.thinking || "";
+                return {
+                  ...prev,
+                  thinking: prevThinking + eventData.content
+                };
+              });
+            } 
+            else if (isFinalResponseChunk) {
+              // This is a chunk for the final response - stream it
+              console.log('Final response chunk received:', eventData.content.substring(0, 20) + "...");
+              
+              // Create a streaming final response if it doesn't exist yet
+              // Always put final response chunks into the streaming UI
+              console.log('Final response chunk length:', eventData.content.length);
+              
+              // For debugging - show the first 50 chars
+              console.log('Content sample:', eventData.content.substring(0, 50));
+              
+              // Add or append to the final response streaming content
+              setStreamingMessages(prev => {
+                const prevFinalResponse = prev.final_response || "";
+                // Important: Only keep thinking and final_response properties to ensure proper streaming
+                // This creates a new object with only these two properties
+                return {
+                  thinking: prev.thinking,
+                  final_response: prevFinalResponse + eventData.content
+                };
+              });
+            }
+            else if (chatIndex !== undefined) {
+              // This is a content chunk for a specific subtask
+              // We DON'T stream subtask content, just store the full response when complete
+              console.log(
+                `Content for subtask ${chatIndex} received - not streaming`,
+                eventData.content.substring(0, 20) + "...",
+              );
+              
+              // Store just the task subjects, but not the content
+            }
           }
           break;
 
         case "final_response":
           console.log("Final synthesized response received");
           
-          // This is the final synthesized response from all parallel tasks
+          // Treat this exactly like a content chunk for the final response
           if (eventData.content) {
-            const finalResponseMessage: Message = {
-              role: "assistant",
-              content: eventData.content,
-              is_final_response: true
-            };
+            // Stream this response chunk
+            console.log('Streaming final response:', eventData.content.substring(0, 20) + "...");
             
-            // Add final response to messages
-            setMessages(prev => {
-              // Remove any previous final responses
-              const filteredMessages = prev.filter(msg => !msg.is_final_response);
-              return [...filteredMessages, finalResponseMessage];
+            // Add as a streaming chunk, append to existing final_response if any
+            setStreamingMessages(prev => {
+              const prevFinalResponse = prev.final_response || "";
+              // Important: Only keep thinking and final_response properties to ensure clean streaming
+              // This completely replaces the previous state with only these two properties
+              return {
+                thinking: prev.thinking,
+                final_response: prevFinalResponse + eventData.content
+              };
             });
           }
           break;
 
+        case "stream_start":
+          // Handle stream start events
+          console.log("Stream start event:", eventData);
+          
+          // If this is a final response stream, prepare the final_response property
+          if (eventData.metadata?.is_final_response === true) {
+            console.log("Starting to stream final response");
+            
+            // Initialize the streaming final response if it doesn't exist yet
+            setStreamingMessages(prev => ({
+              ...prev,
+              final_response: ""  // Initialize with empty string so we can append to it
+            }));
+          }
+          break;
+          
         case "metadata":
           if (eventData.metadata?.status === "all_complete") {
             console.log(`All ${eventData.metadata.task_count} tasks completed`);
-            setLoading(false);
+            
+            setTimeout(() => {
+              // If we have a streaming final response, add it to messages and clear streaming
+              if (streamingMessages.final_response) {
+                const finalResponseMessage: Message = {
+                  role: "assistant",
+                  content: streamingMessages.final_response,
+                  is_final_response: true
+                };
+                
+                // Add streamed final response to messages
+                setMessages(prev => {
+                  // Remove any previous final responses
+                  const filteredMessages = prev.filter(msg => !msg.is_final_response);
+                  return [...filteredMessages, finalResponseMessage];
+                });
+                
+                // Create a copy of the reasoningMessages to preserve them
+                const reasoningCopy = [...currentReasoningMessages];
+                
+                // First set loading to false to hide the cursor
+                setLoading(false);
+                
+                // Then clear streaming messages to end the streaming state
+                // Use a small timeout to ensure the cursor disappears first
+                setTimeout(() => {
+                  setStreamingMessages({});
+                  
+                  // Keep the reasoning messages so they persist in the UI
+                  setCurrentReasoningMessages(reasoningCopy);
+                }, 100);
+              } else {
+                // Mark loading as complete
+                setLoading(false);
+              }
+            }, 500); // Small delay to ensure all final content is received
             
             // Keep reasoning messages visible after completion
             // No need to clear currentReasoningMessages
@@ -264,7 +410,7 @@ export default function ChatPage() {
     } catch (error) {
       console.error("Error processing SSE event:", error);
     }
-  }, [streamingMessages, taskSubjects, currentReasoningMessages]);
+  }, [streamingMessages, currentReasoningMessages]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || loading) return;
@@ -275,13 +421,20 @@ export default function ChatPage() {
     setLoading(true);
 
     // Clear any existing streaming messages for the new query
-    setStreamingMessages({});
+    // But immediately create a new one with a thinking property to show the dropdown
+    setStreamingMessages({ thinking: "Analyzing your query..." });
     
-      // Don't persist reasoning messages between requests
-    // Just clear current reasoning to prepare for the new query
-    setCurrentReasoningMessages([]);
+    // Initialize a reasoning message immediately to show thinking dropdown
+    const initialReasoningMessage: Message = {
+      role: "assistant",
+      content: "Analyzing your query...",
+      is_reasoning: true,
+      reasoning_step: 1,
+      subject: "Query Analysis"
+    };
+    setCurrentReasoningMessages([initialReasoningMessage]);
     
-    // Auto-expand reasoning for the new query
+    // Auto-expand reasoning when starting a new query
     setReasoningExpanded(true);
     
     // Reset connection state

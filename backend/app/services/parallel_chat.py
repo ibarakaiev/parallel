@@ -102,7 +102,8 @@ class ParallelChatService:
             # STEP 3: "FINAL RESPONSE" - Generate a synthesized response
             # Generate the final response by synthesizing all the completed task results
             if task_count > 1:
-                final_response = await self._generate_final_response(
+                # This will now stream the response directly as chunks
+                await self._generate_final_response(
                     sequence_id=sequence_id,
                     user_query=user_query,
                     task_results=task_results,
@@ -110,15 +111,24 @@ class ParallelChatService:
                 )
             else:
                 # If there's only one task, use its result as the final response
-                final_response = task_results[0]["content"] if task_results else "No results were generated."
-            
-            # Send the final synthesized response
-            await self.transport.send_event(StreamEvent(
-                event_type=StreamEventType.FINAL_RESPONSE,
-                sequence_id=sequence_id,
-                content=final_response,
-                metadata={"task_count": task_count}
-            ))
+                # Stream it as a single chunk
+                result_content = task_results[0]["content"] if task_results else "No results were generated."
+                
+                # Send a stream start event
+                await self.transport.send_event(StreamEvent(
+                    event_type=StreamEventType.STREAM_START,
+                    sequence_id=sequence_id,
+                    content="",
+                    metadata={"is_final_response": True}
+                ))
+                
+                # Stream the single task result as the final response
+                await self.transport.send_event(StreamEvent(
+                    event_type=StreamEventType.CONTENT_CHUNK,
+                    sequence_id=sequence_id,
+                    content=result_content,
+                    metadata={"is_final_response": True}
+                ))
             
             # Send completion event
             await self.transport.send_event(StreamEvent(
@@ -214,19 +224,36 @@ class ParallelChatService:
                                      sequence_id: str,
                                      user_query: str,
                                      task_results: List[Dict[str, Any]],
-                                     task_subjects: List[str]) -> str:
-        """Generate a final synthesized response from all the parallel task results"""
+                                     task_subjects: List[str]) -> None:
+        """Generate a final synthesized response from all the parallel task results with streaming"""
         try:
             # Sort results by task_index to ensure correct order
             sorted_results = sorted(task_results, key=lambda x: x["task_index"])
             
-            # Generate the synthesis using the synthesizer component
-            synthesis = await self.synthesizer.generate_synthesis(
+            # Send stream start event for final response
+            await self.transport.send_event(StreamEvent(
+                event_type=StreamEventType.STREAM_START,
+                sequence_id=sequence_id,
+                content="",
+                metadata={"is_final_response": True}
+            ))
+            
+            # Generate the synthesis using the synthesizer component with streaming
+            # The synthesizer now returns chunks that we can stream to the client
+            async for chunk in self.synthesizer.generate_synthesis(
                 user_query=user_query,
                 task_results=sorted_results
-            )
+            ):
+                # Stream each chunk as a content chunk
+                await self.transport.send_event(StreamEvent(
+                    event_type=StreamEventType.CONTENT_CHUNK,
+                    sequence_id=sequence_id,
+                    content=chunk,
+                    metadata={"is_final_response": True}
+                ))
             
-            return synthesis
+            # No need to return anything since we've streamed everything
+            return ""
             
         except Exception as e:
             # If synthesis fails, create a simple synthesis ourselves
@@ -242,8 +269,16 @@ class ParallelChatService:
                 # Add a summary of each result (first 200 chars)
                 summary = content[:200] + "..." if len(content) > 200 else content
                 fallback_synthesis += f"## {subject}\n{summary}\n\n"
-                
-            return fallback_synthesis
+            
+            # Send the fallback synthesis as a single chunk
+            await self.transport.send_event(StreamEvent(
+                event_type=StreamEventType.CONTENT_CHUNK,
+                sequence_id=sequence_id,
+                content=fallback_synthesis,
+                metadata={"is_final_response": True}
+            ))
+            
+            return ""
     
     async def _send_error(self, 
                          sequence_id: str, 

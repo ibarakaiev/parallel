@@ -6,9 +6,12 @@ import ReactMarkdown from "react-markdown";
 
 // Custom rendering components for markdown to ensure proper styling
 const MarkdownComponents = {
-  p: ({node, ...props}) => <p className="my-1" {...props} />,
-  pre: ({node, ...props}) => <pre className="my-2" {...props} />,
-  code: ({node, inline, ...props}) => 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  p: ({...props}: any) => <p className="my-1" {...props} />,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pre: ({...props}: any) => <pre className="my-2" {...props} />,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  code: ({inline, ...props}: {inline?: boolean, [key: string]: any}) => 
     inline ? <code {...props} /> : <code className="block p-2" {...props} />
 };
 
@@ -102,56 +105,35 @@ export default function ChatInterface({
         <div className="max-w-5xl mx-auto space-y-4">
           {/* All conversation messages in sequence - one pair at a time */}
           <div className="space-y-4">
-            {getMessagesByChat().map((message, index) => {
-              const isUserMessage = message.role === "user";
-              // Show reasoning before the assistant response but after the user message 
-              // AND only for the most recent user message (last user message in the conversation)
-              const isLastUserMessage = isUserMessage && 
-                                      getMessagesByChat().filter(m => m.role === "user").pop() === message;
-              const showReasoning = isLastUserMessage && 
-                                  reasoningMessages.length > 0 && 
-                                  index < getMessagesByChat().length - 1;
-                
-              return (
-                <div key={`message-group-${index}`}>
-                  {/* The message itself */}
-                  <MessageComponent key={`message-${index}`} message={message} />
-                  
-                  {/* Show reasoning steps after user message but before assistant's response */}
-                  {showReasoning && (
-                    <div className="mt-4 mb-4 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-white dark:bg-background-secondary">
-                      {/* Reasoning header - clickable to expand/collapse */}
+            {getMessagesByChat().map((message, index) => (
+              <div key={`message-group-${index}`}>
+                {/* The message itself */}
+                <MessageComponent 
+                  key={`message-${index}`} 
+                  message={message} 
+                  reasoningMessages={reasoningMessages}
+                  reasoningExpanded={reasoningExpanded}
+                  toggleReasoningExpanded={toggleReasoningExpanded}
+                  taskSubjects={taskSubjects}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Single streaming message with thinking dropdown */}
+          {(loading || streamingMessages.thinking || streamingMessages.final_response) && (
+              <div className="flex justify-start">
+                <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
+                  {/* Thinking dropdown - always show when we have reasoning messages */}
+                  {reasoningMessages.length > 0 && (
+                    <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
+                      {/* Thinking header - clickable to expand/collapse */}
                       <div 
-                        className="flex items-center justify-between p-3 border-b border-accent-200 dark:border-accent-300 cursor-pointer hover:bg-accent-50 dark:hover:bg-accent-800/10"
+                        className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
                         onClick={toggleReasoningExpanded}
                       >
                         <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            />
-                            <path
-                              d="M12 16V12"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                            <path
-                              d="M12 8H12.01"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                          <span className="font-medium text-sm">Reasoning steps ({reasoningMessages.length})</span>
+                          <span className="font-medium text-sm">thinking</span>
                         </div>
                         <svg
                           width="16"
@@ -171,83 +153,138 @@ export default function ChatInterface({
                         </svg>
                       </div>
                       
-                      {/* Reasoning content - collapsible */}
+                      {/* Thinking content - collapsible */}
                       {reasoningExpanded && (
-                        <div className="p-4">
-                          <div className="space-y-4">
-                            {reasoningMessages.map((message, idx) => (
-                              <div key={`reasoning-${idx}`} className="border-b border-accent-100 dark:border-accent-800 pb-4 last:border-b-0 last:pb-0">
-                                <div className="text-sm text-accent-700 dark:text-accent-700 font-semibold mb-1 flex items-center gap-2">
-                                  <span className="px-2 py-0.5 bg-accent-100 dark:bg-accent-800/30 rounded-full text-xs">
-                                    {message.reasoning_step === 1 ? 'Decomposition' : message.subject || `Task ${message.chat_id !== undefined ? message.chat_id + 1 : ''}`}
-                                  </span>
-                                </div>
-                                <div className="text-sm leading-relaxed font-serif markdown-content">
-                                  <ReactMarkdown components={MarkdownComponents}>{message.content}</ReactMarkdown>
-                                </div>
+                        <div className="p-3 border-t border-accent-200 dark:border-accent-300">
+                          {/* General reasoning plan */}
+                          {reasoningMessages.length > 0 && reasoningMessages[0] && (
+                            <div className="mb-3">
+                              <div className="text-sm font-medium mb-1">Reasoning</div>
+                              <div className="text-sm text-accent-800 dark:text-accent-700">
+                                <ReactMarkdown components={MarkdownComponents}>
+                                  {streamingMessages.thinking || reasoningMessages[0].content}
+                                </ReactMarkdown>
+                                {/* Add blinking cursor to reasoning text only when actively streaming reasoning */}
+                                {streamingMessages.thinking && !streamingMessages.final_response && (
+                                  <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
+                                )}
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          )}
+                          
+                          {/* Grid of subtasks - only show in thinking view */}
+                          {taskSubjects && taskSubjects.length > 0 && (
+                            <div>
+                              <div className="text-sm font-medium mb-1">Subtasks</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                {taskSubjects.map((subject, idx) => (
+                                  <div 
+                                    key={`task-subject-${idx}`} 
+                                    className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs"
+                                  >
+                                    {subject}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Parallel streaming messages in a grid */}
-          {numParallelChats > 1 && Object.keys(streamingMessages).length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {Object.keys(streamingMessages).map((idx) => {
-                const taskIndex = parseInt(idx);
-                const content = streamingMessages[taskIndex] || "";
-                
-                return (
-                  <div
-                    key={`stream-container-${taskIndex}`}
-                    className="flex flex-col"
-                  >
-                    <div className="text-sm text-gray-500 dark:text-gray-400 font-semibold mb-1">
-                      {/* Use taskSubjects if available, otherwise fall back to finding the subject in messages */}
-                      {taskSubjects && taskIndex < taskSubjects.length ? taskSubjects[taskIndex] : 
-                       reasoningMessages.find(m => m.chat_id === taskIndex)?.subject || `Task ${taskIndex + 1}`}
-                    </div>
-                    <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm flex-1 border border-accent-200 dark:border-accent-300">
-                      <div className="text-base leading-relaxed font-serif markdown-content">
-                        <ReactMarkdown components={MarkdownComponents}>{content}</ReactMarkdown>
+                  
+                  {/* Show the final response streaming if available - this is the main content */}
+                  {streamingMessages.final_response && (
+                    <div className="text-base leading-relaxed font-serif markdown-content">
+                      <ReactMarkdown components={MarkdownComponents}>
+                        {streamingMessages.final_response || ""}
+                      </ReactMarkdown>
+                      {/* Only show cursor when loading is true */}
+                      {loading && (
                         <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Single streaming message */}
-          {numParallelChats === 1 &&
-            Object.keys(streamingMessages).length > 0 && (
-              <div className="flex justify-start">
-                <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
-                  {taskSubjects && taskSubjects[0] && (
-                    <div className="mb-1 text-sm text-accent-700 dark:text-accent-700 font-semibold">
-                      {taskSubjects[0]}
+                      )}
                     </div>
                   )}
-                  <div className="text-base leading-relaxed font-serif markdown-content">
-                    <ReactMarkdown components={MarkdownComponents}>{streamingMessages[0] || ""}</ReactMarkdown>
-                    <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
-                  </div>
+                  
+                  {/* Simple loading indicator when waiting for final response */}
+                  {!streamingMessages.final_response && loading && (
+                    <div className="flex items-center gap-2 py-1">
+                      <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
+                      <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse" style={{ animationDelay: "0.2s" }}></div>
+                      <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse" style={{ animationDelay: "0.4s" }}></div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-          {/* Decomposition indicator */}
+          {/* Decomposition indicator with thinking dropdown */}
           {decomposing && (
             <div className="flex justify-start">
-              <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
+              <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
+                {/* Thinking dropdown */}
+                {reasoningMessages.length > 0 && (
+                  <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
+                    {/* Thinking header - clickable to expand/collapse */}
+                    <div 
+                      className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
+                      onClick={toggleReasoningExpanded}
+                    >
+                      <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
+                        <span className="font-medium text-sm">thinking</span>
+                      </div>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? 'rotate-180' : ''}`}
+                      >
+                        <path
+                          d="M6 9L12 15L18 9"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    
+                    {/* Thinking content - collapsible */}
+                    {reasoningExpanded && (
+                      <div className="p-3 border-t border-accent-200 dark:border-accent-300">
+                        {/* General reasoning plan */}
+                        {reasoningMessages.length > 0 && reasoningMessages[0] && (
+                          <div className="mb-3">
+                            <div className="text-sm font-medium mb-1">Reasoning</div>
+                            <div className="text-sm text-accent-800 dark:text-accent-700">
+                              <ReactMarkdown components={MarkdownComponents}>{reasoningMessages[0].content}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Grid of subtasks */}
+                        {taskSubjects && taskSubjects.length > 0 && (
+                          <div>
+                            <div className="text-sm font-medium mb-1">Subtasks</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {taskSubjects.map((subject, idx) => (
+                                <div 
+                                  key={`task-subject-${idx}`} 
+                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs"
+                                >
+                                  {subject}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2">
                   <div className="text-base text-accent-700 dark:text-accent-700 mb-1 font-serif">
                     Analyzing and decomposing your query...
@@ -271,7 +308,70 @@ export default function ChatInterface({
           {/* Loading indicator (only shown when not streaming and not decomposing) */}
           {loading && !decomposing && Object.keys(streamingMessages).length === 0 && (
             <div className="flex justify-start">
-              <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm max-w-[85%] border border-accent-200 dark:border-accent-300">
+              <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
+                {/* Thinking dropdown */}
+                {reasoningMessages.length > 0 && (
+                  <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
+                    {/* Thinking header - clickable to expand/collapse */}
+                    <div 
+                      className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
+                      onClick={toggleReasoningExpanded}
+                    >
+                      <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
+                        <span className="font-medium text-sm">thinking</span>
+                      </div>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? 'rotate-180' : ''}`}
+                      >
+                        <path
+                          d="M6 9L12 15L18 9"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    
+                    {/* Thinking content - collapsible */}
+                    {reasoningExpanded && (
+                      <div className="p-3 border-t border-accent-200 dark:border-accent-300">
+                        {/* General reasoning plan */}
+                        {reasoningMessages.length > 0 && reasoningMessages[0] && (
+                          <div className="mb-3">
+                            <div className="text-sm font-medium mb-1">Reasoning</div>
+                            <div className="text-sm text-accent-800 dark:text-accent-700">
+                              <ReactMarkdown components={MarkdownComponents}>{reasoningMessages[0].content}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Grid of subtasks */}
+                        {taskSubjects && taskSubjects.length > 0 && (
+                          <div>
+                            <div className="text-sm font-medium mb-1">Subtasks</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {taskSubjects.map((subject, idx) => (
+                                <div 
+                                  key={`task-subject-${idx}`} 
+                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs"
+                                >
+                                  {subject}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
                   <div
@@ -357,13 +457,27 @@ export default function ChatInterface({
   );
 }
 
-function MessageComponent({ message }: { message: Message }) {
+function MessageComponent({ 
+  message, 
+  reasoningMessages = [],
+  reasoningExpanded = false,
+  toggleReasoningExpanded = () => {},
+  taskSubjects = []
+}: { 
+  message: Message,
+  reasoningMessages?: Message[],
+  reasoningExpanded?: boolean,
+  toggleReasoningExpanded?: () => void,
+  taskSubjects?: string[]
+}) {
   const isUser = message.role === "user";
+  // Don't show reasoning dropdown in final response messages anymore
+  // This prevents the duplicate dropdown issue
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`p-4 rounded-lg shadow-sm max-w-[85%] ${
+        className={`p-4 rounded-lg shadow-sm w-full ${
           isUser
             ? "bg-accent-600 text-white"
             : "bg-white dark:bg-background-secondary text-accent-900 dark:text-accent-900 border border-accent-200 dark:border-accent-300"
