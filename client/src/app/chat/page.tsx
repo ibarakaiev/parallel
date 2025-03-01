@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import ChatInterface from "./components/ChatInterface";
 import { Message, WebSocketMessage } from "./types";
 
@@ -18,206 +18,173 @@ export default function ChatPage() {
   const [connected, setConnected] = useState(false);
   const [numParallelChats, setNumParallelChats] = useState(1);
 
-  const socketRef = useRef<WebSocket | null>(null);
+  // This component now uses SSE instead of WebSockets
 
   // Debug streaming message changes
   useEffect(() => {
     console.log("Streaming messages updated:", streamingMessages);
   }, [streamingMessages]);
 
-  // Connect to WebSocket
+  // Initialize connection status
   useEffect(() => {
-    const connectWebSocket = () => {
-      console.log("Connecting to WebSocket...");
-
-      const socket = new WebSocket("ws://localhost:4000/ws/chat");
-
-      socket.onopen = () => {
-        console.log("WebSocket connected successfully");
-        setConnected(true);
-      };
-
-      socket.onclose = (event) => {
-        console.log("WebSocket disconnected", event.code, event.reason);
-        setConnected(false);
-
-        // Attempt to reconnect after a delay
-        setTimeout(() => {
-          if (socketRef.current?.readyState !== WebSocket.OPEN) {
-            console.log("Attempting to reconnect...");
-            connectWebSocket();
-          }
-        }, 3000);
-      };
-
-      socket.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
-
-      socket.onmessage = (event) => {
-        console.log("WebSocket message received:", event.data);
-        try {
-          const data: WebSocketMessage = JSON.parse(event.data);
-          console.log("Parsed WebSocket message:", data);
-
-          switch (data.type) {
-            case "decomposition_start":
-              console.log("Decomposing query:", data.message);
-              setDecomposing(true);
-              break;
-              
-            case "batch_start":
-              console.log(`Starting batch of ${data.count} parallel chats with subjects:`, data.subjects);
-              // Set the number of parallel chats based on the decomposition
-              setNumParallelChats(data.count || 1);
-              // Save the task subjects
-              setTaskSubjects(data.subjects || []);
-              
-              // Initialize UI grid with empty slots for all chats
-              const initialStreamingMessages: Record<number, string> = {};
-              for (let i = 0; i < data.count!; i++) {
-                initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
-              }
-              setStreamingMessages(initialStreamingMessages);
-              // End the decomposing state
-              setDecomposing(false);
-
-              // Clear any previous completed messages with chat_id
-              setMessages((prev) =>
-                prev.filter(
-                  (msg) =>
-                    msg.role !== "assistant" || msg.chat_id === undefined,
-                ),
-              );
-              break;
-
-            case "stream_start":
-              console.log(`Stream ${data.chat_id} started for subject: ${data.subject || 'unknown'}`);
-              // If we received a subject, add it to the taskSubjects array
-              if (data.subject && data.chat_id !== undefined) {
-                setTaskSubjects(prev => {
-                  const newSubjects = [...prev];
-                  newSubjects[data.chat_id!] = data.subject!;
-                  return newSubjects;
-                });
-              }
-              
-              // Initialize streaming message for this chat
-              if (data.chat_id !== undefined) {
-                setStreamingMessages((prev) => ({
-                  ...prev,
-                  [data.chat_id]: "",
-                }));
-              }
-              break;
-
-            case "chunk":
-              if (data.content && data.chat_id !== undefined) {
-                console.log(
-                  `Chunk for chat ${data.chat_id} received:`,
-                  data.content.substring(0, 20) + "...",
-                );
-                // Append new content to streaming message for this chat
-                setStreamingMessages((prev) => {
-                  const prevContent = prev[data.chat_id!] || "";
-                  return {
-                    ...prev,
-                    [data.chat_id!]: prevContent + data.content!,
-                  };
-                });
-              }
-              break;
-
-            case "stream_end":
-              console.log(`Stream ${data.chat_id} ended for subject: ${data.subject || 'unknown'}`);
-              // Streaming ended, add the complete message
-              if (data.content && data.chat_id !== undefined) {
-                // Get subject from message or from taskSubjects array if available
-                let subject = data.subject;
-                if (!subject && data.chat_id < taskSubjects.length) {
-                  subject = taskSubjects[data.chat_id];
-                }
-                
-                const newAssistantMessage: Message = {
-                  role: "assistant",
-                  content: data.content,
-                  chat_id: data.chat_id,
-                  subject: subject
-                };
-                setMessages((prev) => [...prev, newAssistantMessage]);
-
-                // Clear streaming message for this chat
-                setStreamingMessages((prev) => {
-                  const newState = { ...prev };
-                  delete newState[data.chat_id!];
-                  return newState;
-                });
-              }
-              break;
-
-            case "all_complete":
-              console.log(`All ${data.total} chats completed`);
-              setLoading(false);
-              break;
-
-            case "error":
-              console.error("Error from server:", data.error);
-              // Show error message to the user
-              const errorMessage: Message = {
-                role: "assistant",
-                content: `Sorry, there was an error: ${data.error || "Unknown error"}`,
-                chat_id: data.chat_id,
-              };
-              setMessages((prev) => [...prev, errorMessage]);
-
-              // Clear streaming message if chat_id is provided
-              if (data.chat_id !== undefined) {
-                setStreamingMessages((prev) => {
-                  const newState = { ...prev };
-                  delete newState[data.chat_id!];
-                  return newState;
-                });
-              }
-
-              // End the decomposing state if it was active
-              setDecomposing(false);
-
-              // If this was the last active chat or a general error, set loading to false
-              if (
-                Object.keys(streamingMessages).length === 0 ||
-                data.chat_id === undefined
-              ) {
-                setLoading(false);
-              }
-              break;
-
-            default:
-              console.warn("Unknown message type:", data);
-          }
-        } catch (error) {
-          console.error("Error parsing WebSocket message:", error);
-        }
-      };
-
-      socketRef.current = socket;
-
-      // Clean up function
-      return () => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.close();
-        }
-      };
-    };
-
-    connectWebSocket();
-
-    // Clean up on component unmount
-    return () => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.close();
-      }
-    };
+    setConnected(false);
   }, []);
+
+  // Handle processing SSE events
+  const processSSEEvent = useCallback((eventData: any) => {
+    try {
+      console.log("SSE data received:", eventData);
+      
+      switch (eventData.type) {
+        case "thinking_start":
+          console.log("Thinking started:", eventData.content);
+          setDecomposing(true);
+          break;
+          
+        case "thinking_end":
+          console.log("Thinking ended with summary:", eventData.content);
+          // Set the number of parallel chats based on the metadata
+          const taskCount = eventData.metadata?.task_count || 1;
+          const subjects = eventData.metadata?.task_subjects || [];
+          setNumParallelChats(taskCount);
+          setTaskSubjects(subjects);
+          
+          // Initialize UI grid with empty slots for all chats
+          const initialStreamingMessages: Record<number, string> = {};
+          for (let i = 0; i < taskCount; i++) {
+            initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
+          }
+          setStreamingMessages(initialStreamingMessages);
+          
+          // End the decomposing state
+          setDecomposing(false);
+
+          // Clear any previous completed messages with chat_id
+          setMessages((prev) =>
+            prev.filter(
+              (msg) =>
+                msg.role !== "assistant" || msg.chat_id === undefined,
+            ),
+          );
+          break;
+
+        case "stream_start":
+          const taskIndex = eventData.metadata?.task_index;
+          const subject = eventData.metadata?.subject;
+          console.log(`Stream started for task ${taskIndex} with subject: ${subject || 'unknown'}`);
+          
+          // If we received a subject, add it to the taskSubjects array
+          if (subject !== undefined && taskIndex !== undefined) {
+            setTaskSubjects(prev => {
+              const newSubjects = [...prev];
+              newSubjects[taskIndex] = subject;
+              return newSubjects;
+            });
+          }
+          
+          // Initialize streaming message for this chat
+          if (taskIndex !== undefined) {
+            setStreamingMessages((prev) => ({
+              ...prev,
+              [taskIndex]: "",
+            }));
+          }
+          break;
+
+        case "content_chunk":
+          const chatIndex = eventData.metadata?.task_index;
+          if (eventData.content && chatIndex !== undefined) {
+            console.log(
+              `Chunk for chat ${chatIndex} received:`,
+              eventData.content.substring(0, 20) + "...",
+            );
+            // Append new content to streaming message for this chat
+            setStreamingMessages((prev) => {
+              const prevContent = prev[chatIndex] || "";
+              return {
+                ...prev,
+                [chatIndex]: prevContent + eventData.content,
+              };
+            });
+          }
+          break;
+
+        case "stream_end":
+          const endTaskIndex = eventData.metadata?.task_index;
+          const endSubject = eventData.metadata?.subject;
+          console.log(`Stream ended for task ${endTaskIndex} with subject: ${endSubject || 'unknown'}`);
+          
+          // Streaming ended, add the complete message
+          if (eventData.content && endTaskIndex !== undefined) {
+            // Get subject from event metadata or from taskSubjects array if available
+            let finalSubject = endSubject;
+            if (!finalSubject && endTaskIndex < taskSubjects.length) {
+              finalSubject = taskSubjects[endTaskIndex];
+            }
+            
+            const newAssistantMessage: Message = {
+              role: "assistant",
+              content: eventData.content,
+              chat_id: endTaskIndex,
+              subject: finalSubject
+            };
+            setMessages((prev) => [...prev, newAssistantMessage]);
+
+            // Clear streaming message for this chat
+            setStreamingMessages((prev) => {
+              const newState = { ...prev };
+              delete newState[endTaskIndex];
+              return newState;
+            });
+          }
+          break;
+
+        case "metadata":
+          if (eventData.metadata?.status === "all_complete") {
+            console.log(`All ${eventData.metadata.task_count} tasks completed`);
+            setLoading(false);
+          }
+          break;
+
+        case "error":
+          console.error("Error from server:", eventData.content);
+          // Show error message to the user
+          const errorTaskIndex = eventData.metadata?.task_index;
+          const errorMessage: Message = {
+            role: "assistant",
+            content: `Sorry, there was an error: ${eventData.content || "Unknown error"}`,
+            chat_id: errorTaskIndex,
+          };
+          setMessages((prev) => [...prev, errorMessage]);
+
+          // Clear streaming message if task_index is provided
+          if (errorTaskIndex !== undefined) {
+            setStreamingMessages((prev) => {
+              const newState = { ...prev };
+              delete newState[errorTaskIndex];
+              return newState;
+            });
+          }
+
+          // End the decomposing state if it was active
+          setDecomposing(false);
+
+          // If this was the last active chat or a general error, set loading to false
+          if (
+            Object.keys(streamingMessages).length === 0 ||
+            errorTaskIndex === undefined
+          ) {
+            setLoading(false);
+          }
+          break;
+
+        default:
+          console.warn("Unknown event type:", eventData);
+      }
+    } catch (error) {
+      console.error("Error processing SSE event:", error);
+    }
+  }, [streamingMessages, taskSubjects]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || loading) return;
@@ -229,57 +196,110 @@ export default function ChatPage() {
 
     // Clear any existing streaming messages
     setStreamingMessages({});
+    
+    // Reset connection state
+    setConnected(false);
 
     try {
-      // Use WebSocket if connected, otherwise fall back to fetch API
-      if (connected && socketRef.current?.readyState === WebSocket.OPEN) {
-        // Send message through WebSocket (no n parameter - it's determined by the backend)
-        const updatedMessages = [...messages, newUserMessage];
-        socketRef.current.send(
-          JSON.stringify({
-            messages: updatedMessages
-          }),
-        );
-      } else {
-        // Fall back to traditional REST API
-        const updatedMessages = [...messages, newUserMessage];
-
-        const response = await fetch("http://localhost:4000/chat_completion", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messages: updatedMessages
-          }),
-          mode: "cors",
-          credentials: "omit",
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-
-          const newAssistantMessage: Message = {
-            role: "assistant",
-            content: data.response,
-            chat_id: 0,
-          };
-
-          setMessages((prev) => [...prev, newAssistantMessage]);
-        } else {
-          const newAssistantMessage: Message = {
-            role: "assistant",
-            content:
-              "Sorry, I'm having trouble connecting to the assistant service.",
-          };
-
-          setMessages((prev) => [...prev, newAssistantMessage]);
-          console.warn("API returned error status:", response.status);
-        }
-        setLoading(false);
+      // Create the conversation history including the new message
+      const updatedMessages = [...messages, newUserMessage];
+      
+      // Use fetch to create a streaming response
+      const apiUrl = "http://localhost:4000/v1/messages";
+      
+      // Create message body for API request
+      const messageBody = updatedMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Make the POST request directly
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: messageBody,
+          stream: true
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
+      // Get the response as a readable stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Response body is not readable");
+      }
+      
+      // Process the stream
+      const decoder = new TextDecoder();
+      let buffer = "";
+      
+      // Set up a reading function that processes chunks as they arrive
+      const readStream = async () => {
+        try {
+          while (true) {
+            const {done, value} = await reader.read();
+            
+            if (done) {
+              console.log("Stream complete");
+              setLoading(false);
+              break;
+            }
+            
+            // Decode the chunk and add to buffer
+            const chunk = decoder.decode(value, {stream: true});
+            buffer += chunk;
+            
+            // Process complete SSE messages from the buffer
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop() || ""; // Keep the last incomplete chunk in the buffer
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  // Extract the JSON data from the SSE format
+                  const jsonStr = line.substring(6); // Remove 'data: ' prefix
+                  if (jsonStr === "[DONE]") {
+                    console.log("Stream marked as done");
+                    continue;
+                  }
+                  
+                  const eventData = JSON.parse(jsonStr);
+                  processSSEEvent(eventData);
+                } catch (e) {
+                  console.error("Error parsing SSE data:", e, line);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error reading stream:", error);
+          setLoading(false);
+          
+          // Show error message
+          const errorMessage: Message = {
+            role: "assistant",
+            content: "Sorry, there was an error processing the stream."
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        }
+      };
+      
+      // Start reading the stream
+      readStream();
+      
+      // Indicate connection is active
+      setConnected(true);
+      
+      // Stream reading is handled by the readStream function above
+      
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("Error setting up SSE connection:", error);
 
       const newAssistantMessage: Message = {
         role: "assistant",
@@ -378,11 +398,11 @@ export default function ChatPage() {
               Chat Assistant
             </h2>
 
-            {/* WebSocket connection status */}
+            {/* Connection status */}
             <div
               className={`px-2 py-0.5 text-xs rounded-full font-serif ${connected ? "bg-accent-100 text-accent-800 dark:bg-accent-200 dark:text-accent-800" : "bg-red-100 text-red-800 dark:bg-red-100 dark:text-red-800"}`}
             >
-              {connected ? "WebSocket Connected" : "WebSocket Disconnected"}
+              {connected ? "API Connected" : "API Disconnected"}
             </div>
             
             {/* Auto-decomposition status badge */}
