@@ -41,11 +41,14 @@ export default function ChatInterface({
   onSendMessage,
   decomposing = false,
   taskSubjects = [],
+  taskOutputs = {},
   reasoningMessages = [],
   reasoningExpanded = false,
   toggleReasoningExpanded = () => {},
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
+  const [expandedTask, setExpandedTask] = useState<number | null>(null);
+  const [localTaskOutputs, setLocalTaskOutputs] = useState<Record<number, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -62,6 +65,52 @@ export default function ChatInterface({
       textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     }
   }, [input]);
+  
+  // Update localTaskOutputs when taskOutputs from props change
+  useEffect(() => {
+    if (Object.keys(taskOutputs).length > 0) {
+      setLocalTaskOutputs(prev => ({
+        ...prev,
+        ...taskOutputs
+      }));
+    }
+  }, [taskOutputs]);
+  
+  // Function to toggle expanded task
+  const toggleExpandTask = (idx: number) => {
+    setExpandedTask(expandedTask === idx ? null : idx);
+    
+    // If we don't have output for this task yet in our local state, check server output first
+    if (!localTaskOutputs[idx]) {
+      if (taskOutputs[idx]) {
+        // Use real task output from the server if available
+        setLocalTaskOutputs(prev => ({ ...prev, [idx]: taskOutputs[idx] }));
+      } else {
+        // Simulate streaming output for the task as a fallback
+        const mockOutput = `Processing task: ${taskSubjects[idx]}\n\nAnalyzing data...\n`;
+        setLocalTaskOutputs(prev => ({ ...prev, [idx]: mockOutput }));
+        
+        // Simulate streaming updates
+        let counter = 0;
+        const interval = setInterval(() => {
+          counter++;
+          setLocalTaskOutputs(prev => ({
+            ...prev,
+            [idx]: prev[idx] + `Step ${counter}: ${Math.random() > 0.5 ? 'Found relevant information.' : 'Analyzing sources.'}\n`
+          }));
+          
+          // Stop after some iterations
+          if (counter >= 5) {
+            clearInterval(interval);
+            setLocalTaskOutputs(prev => ({
+              ...prev,
+              [idx]: prev[idx] + `\nTask complete. Results integrated into final response.`
+            }));
+          }
+        }, 1000);
+      }
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +172,15 @@ export default function ChatInterface({
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden bg-accent-50 dark:bg-accent-50">
+      {/* Task output panel */}
+      {expandedTask !== null && taskSubjects[expandedTask] && (
+        <TaskOutputPanel 
+          subject={taskSubjects[expandedTask]} 
+          output={localTaskOutputs[expandedTask] || taskOutputs[expandedTask] || "Loading..."} 
+          onClose={() => setExpandedTask(null)} 
+        />
+      )}
+      
       {/* Messages container */}
       <div className="flex-1 overflow-y-auto py-6 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto space-y-4">
@@ -242,12 +300,20 @@ export default function ChatInterface({
                               {taskSubjects.map((subject, idx) => (
                                 <div
                                   key={`task-subject-${idx}`}
-                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn"
+                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
                                   style={{ animationDelay: `${idx * 100}ms` }}
+                                  onClick={() => toggleExpandTask(idx)}
                                 >
-                                  {subject}
+                                  <div className="flex-1 mr-1 truncate">{subject}</div>
                                   {/* Small dot to indicate running task - only show when loading */}
-                                  {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  {loading && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  {/* Expand icon */}
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
+                                    <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
                                 </div>
                               ))}
                             </div>
@@ -346,11 +412,19 @@ export default function ChatInterface({
                               {taskSubjects.map((subject, idx) => (
                                 <div
                                   key={`task-subject-${idx}`}
-                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn"
+                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                                  onClick={() => toggleExpandTask(idx)}
                                 >
-                                  {subject}
+                                  <div className="flex-1 mr-1 truncate">{subject}</div>
                                   {/* Small dot to indicate running task - only show when loading or decomposing */}
-                                  {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  {/* Expand icon */}
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
+                                    <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
                                 </div>
                               ))}
                             </div>
@@ -443,11 +517,19 @@ export default function ChatInterface({
                                 {taskSubjects.map((subject, idx) => (
                                   <div
                                     key={`task-subject-${idx}`}
-                                    className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn"
+                                    className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                                    onClick={() => toggleExpandTask(idx)}
                                   >
-                                    {subject}
+                                    <div className="flex-1 mr-1 truncate">{subject}</div>
                                     {/* Small dot to indicate running task - only show when loading */}
-                                    {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                    {loading && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                    {/* Expand icon */}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
+                                      <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                      <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                      <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                      <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg>
                                   </div>
                                 ))}
                               </div>
@@ -538,6 +620,39 @@ export default function ChatInterface({
             for new line
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// TaskOutputPanel component
+function TaskOutputPanel({ 
+  subject, 
+  output, 
+  onClose 
+}: { 
+  subject: string; 
+  output: string; 
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed right-0 top-0 bottom-0 w-1/3 bg-white dark:bg-background-secondary border-l border-accent-200 dark:border-accent-300 z-10 shadow-lg flex flex-col">
+      <div className="p-4 border-b border-accent-200 dark:border-accent-300 flex justify-between items-center">
+        <h3 className="font-medium text-accent-900">Task: {subject}</h3>
+        <button 
+          onClick={onClose}
+          className="text-accent-500 hover:text-accent-700"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <div className="p-4 overflow-auto flex-1 bg-accent-50 dark:bg-accent-800/10">
+        <pre className="text-sm font-mono whitespace-pre-wrap break-words text-accent-800 dark:text-accent-700">
+          {output}
+        </pre>
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ export default function ChatPage() {
     Record<number, string>
   >({});
   const [taskSubjects, setTaskSubjects] = useState<string[]>([]);
+  const [taskOutputs, setTaskOutputs] = useState<Record<number, string>>({});
   const [connected, setConnected] = useState(false);
   const [numParallelChats, setNumParallelChats] = useState(1);
 
@@ -317,11 +318,18 @@ export default function ChatPage() {
                 // This is a content chunk for a specific subtask
                 // We DON'T stream subtask content, just store the full response when complete
                 console.log(
-                  `Content for subtask ${chatIndex} received - not streaming`,
+                  `Content for subtask ${chatIndex} received - storing for task output`,
                   eventData.content.substring(0, 20) + "...",
                 );
 
-                // Store just the task subjects, but not the content
+                // Store or append to task output
+                setTaskOutputs(prev => {
+                  const currentOutput = prev[chatIndex] || "";
+                  return {
+                    ...prev,
+                    [chatIndex]: currentOutput + eventData.content
+                  };
+                });
               }
             }
             break;
@@ -738,6 +746,7 @@ export default function ChatPage() {
           onSendMessage={handleSendMessage}
           decomposing={decomposing}
           taskSubjects={taskSubjects}
+          taskOutputs={taskOutputs}
           reasoningMessages={currentReasoningMessages}
           reasoningExpanded={reasoningExpanded}
           toggleReasoningExpanded={toggleReasoningExpanded}

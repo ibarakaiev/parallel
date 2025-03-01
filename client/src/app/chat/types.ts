@@ -16,6 +16,7 @@ export interface ChatInterfaceProps {
   onSendMessage: (message: string) => void;  // Removed n parameter as it's now determined by backend
   decomposing?: boolean; // New flag to show when query is being decomposed
   taskSubjects?: string[]; // Array of task subjects for display
+  taskOutputs?: Record<number, string>; // Outputs from each task
   reasoningMessages?: Message[]; // Messages from the reasoning steps
   reasoningExpanded?: boolean; // Whether reasoning section is expanded
   toggleReasoningExpanded?: () => void; // Toggle reasoning expansion
