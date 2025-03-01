@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Playfair_Display } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const playfair = Playfair_Display({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-inter",
+  variable: "--font-playfair",
 });
 
 export const metadata: Metadata = {
-  title: "Parallel - Modern Chat Interface",
-  description: "A Linear-inspired chat interface",
+  title: "Parallel - Anthropic Chat Interface",
+  description: "An Anthropic-inspired chat interface",
 };
 
 export default function RootLayout({
@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${inter.variable} font-sans antialiased h-full`}>
+      <body className={`${playfair.variable} font-serif antialiased h-full bg-accent-50`}>
         {children}
       </body>
     </html>

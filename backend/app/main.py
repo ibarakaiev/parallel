@@ -20,12 +20,14 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 # Maximum number of concurrent chats
 MAX_CONCURRENT_CHATS = 4
 
+
 # Create a separate session for multiple concurrent connections
 async def get_aiohttp_session():
     return aiohttp.ClientSession(
         headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"},
-        timeout=aiohttp.ClientTimeout(total=300)
+        timeout=aiohttp.ClientTimeout(total=300),
     )
+
 
 app = FastAPI()
 
@@ -107,91 +109,101 @@ async def chat_completion(request: ChatRequest):
         )
 
 
-async def anthropic_stream_request(websocket: WebSocket, chat_id: int, messages: List[Dict[str, str]], session: aiohttp.ClientSession):
+async def anthropic_stream_request(
+    websocket: WebSocket,
+    chat_id: int,
+    messages: List[Dict[str, str]],
+    session: aiohttp.ClientSession,
+):
     """Make a direct streaming request to Anthropic API using aiohttp."""
     try:
         api_url = "https://api.anthropic.com/v1/messages"
-        
+
         # Send stream_start event
-        await websocket.send_json({
-            "type": "stream_start", 
-            "chat_id": chat_id
-        })
-        
+        await websocket.send_json({"type": "stream_start", "chat_id": chat_id})
+
         # Prepare the request payload
         payload = {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 1024,
             "messages": messages,
-            "stream": True
+            "stream": True,
         }
-        
+
         full_response = ""
         chunk_count = 0
         buffer = ""
-        
+
         # Make the streaming request
         async with session.post(api_url, json=payload) as response:
             response.raise_for_status()
             async for line in response.content:
-                line = line.decode('utf-8').strip()
+                line = line.decode("utf-8").strip()
                 if not line:
                     continue
-                    
-                if line.startswith('data: '):
+
+                if line.startswith("data: "):
                     data = line[6:]  # Strip 'data: ' prefix
-                    if data == '[DONE]':
+                    if data == "[DONE]":
                         break
-                        
+
                     try:
                         event = json.loads(data)
-                        if event.get('type') == 'content_block_delta' and 'delta' in event:
-                            text = event['delta'].get('text', '')
+                        if (
+                            event.get("type") == "content_block_delta"
+                            and "delta" in event
+                        ):
+                            text = event["delta"].get("text", "")
                             if text:
                                 full_response += text
                                 chunk_count += 1
                                 # Send chunk to client
-                                await websocket.send_json({
-                                    "type": "chunk",
-                                    "chat_id": chat_id,
-                                    "content": text
-                                })
+                                await websocket.send_json(
+                                    {
+                                        "type": "chunk",
+                                        "chat_id": chat_id,
+                                        "content": text,
+                                    }
+                                )
                     except json.JSONDecodeError:
                         print(f"Chat {chat_id}: Error parsing Anthropic stream: {data}")
-        
+
         # Send stream end event
-        await websocket.send_json({
-            "type": "stream_end",
-            "chat_id": chat_id,
-            "content": full_response
-        })
-        
+        await websocket.send_json(
+            {"type": "stream_end", "chat_id": chat_id, "content": full_response}
+        )
+
         print(f"Chat {chat_id}: Stream complete, sent {chunk_count} chunks")
         return True
-        
+
     except Exception as e:
         error_msg = f"Chat {chat_id}: Streaming error: {str(e)}"
         print(error_msg)
-        await websocket.send_json({
-            "type": "error", 
-            "chat_id": chat_id,
-            "error": error_msg
-        })
+        await websocket.send_json(
+            {"type": "error", "chat_id": chat_id, "error": error_msg}
+        )
         return False
 
 
-async def process_single_chat(websocket: WebSocket, chat_id: int, anthropic_messages: List[Dict[str, str]], session: aiohttp.ClientSession):
+async def process_single_chat(
+    websocket: WebSocket,
+    chat_id: int,
+    anthropic_messages: List[Dict[str, str]],
+    session: aiohttp.ClientSession,
+):
     """Process a single chat stream using a dedicated session."""
     try:
         print(f"Chat {chat_id}: Processing using dedicated connection")
-        
+
         # Stream using direct API call with our session
-        success = await anthropic_stream_request(websocket, chat_id, anthropic_messages, session)
-        
+        success = await anthropic_stream_request(
+            websocket, chat_id, anthropic_messages, session
+        )
+
         if not success:
             # Fallback to the old method
             print(f"Chat {chat_id}: Direct streaming failed, falling back to SDK")
-            
+
             # Generate a normal response using the SDK as fallback
             response = client.messages.create(
                 model="claude-3-haiku-20240307",
@@ -201,22 +213,18 @@ async def process_single_chat(websocket: WebSocket, chat_id: int, anthropic_mess
 
             # Extract response text
             full_response = response.content[0].text
-            
+
             # Send the full response at once
-            await websocket.send_json({
-                "type": "stream_end", 
-                "chat_id": chat_id,
-                "content": full_response
-            })
+            await websocket.send_json(
+                {"type": "stream_end", "chat_id": chat_id, "content": full_response}
+            )
 
     except Exception as e:
         error_msg = f"Chat {chat_id}: Error processing chat: {str(e)}"
         print(error_msg)
-        await websocket.send_json({
-            "type": "error", 
-            "chat_id": chat_id,
-            "error": error_msg
-        })
+        await websocket.send_json(
+            {"type": "error", "chat_id": chat_id, "error": error_msg}
+        )
 
 
 @app.websocket("/ws/chat")
@@ -240,10 +248,12 @@ async def websocket_chat(websocket: WebSocket):
                     }
                 )
                 continue
-                
+
             # Get number of parallel chats to generate (default to 1 if not specified)
             n = min(int(request_data.get("n", 1)), MAX_CONCURRENT_CHATS)
-            print(f"Requested {n} parallel chats, max allowed is {MAX_CONCURRENT_CHATS}")
+            print(
+                f"Requested {n} parallel chats, max allowed is {MAX_CONCURRENT_CHATS}"
+            )
 
             # Convert client messages format to Anthropic's format
             anthropic_messages = []
@@ -255,13 +265,10 @@ async def websocket_chat(websocket: WebSocket):
             try:
                 # Set up all the chat streams with separate connections to ensure true parallelism
                 print(f"Setting up {n} parallel connections to Anthropic")
-                
+
                 # Send batch_start event to initialize all UI placeholders
-                await websocket.send_json({
-                    "type": "batch_start",
-                    "count": n
-                })
-                
+                await websocket.send_json({"type": "batch_start", "count": n})
+
                 # Create a new aiohttp session for this batch
                 async with await get_aiohttp_session() as session:
                     # Start all streams in parallel with their own connections
@@ -270,20 +277,19 @@ async def websocket_chat(websocket: WebSocket):
                         chat_id = i
                         # Create an independent session for each stream
                         stream = asyncio.create_task(
-                            process_single_chat(websocket, chat_id, anthropic_messages, session)
+                            process_single_chat(
+                                websocket, chat_id, anthropic_messages, session
+                            )
                         )
                         streams.append(stream)
-                    
+
                     # Run all streams truly in parallel
                     await asyncio.gather(*streams)
-                
+
                 print(f"All {n} chat streams completed in parallel")
-                    
+
                 # Send a final completion message when all batches are done
-                await websocket.send_json({
-                    "type": "all_complete",
-                    "total": n
-                })
+                await websocket.send_json({"type": "all_complete", "total": n})
 
             except Exception as e:
                 error_msg = f"Error processing parallel chats: {str(e)}"
@@ -300,4 +306,3 @@ async def websocket_chat(websocket: WebSocket):
         except:
             print("Failed to send error response")
             pass
-

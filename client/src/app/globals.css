@@ -2,24 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Linear-inspired base styles */
+/* Anthropic-inspired base styles */
 :root {
   --background: 255 255 255;
-  --foreground: 15 23 42;
+  --background-secondary: 250 247 245;
+  --foreground: 41 41 41;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: 15 23 42;
-    --foreground: 226 232 240;
+    --background: 250 247 245;
+    --background-secondary: 255 255 255;
+    --foreground: 41 41 41;
   }
 }
 
 body {
   background-color: rgb(var(--background));
   color: rgb(var(--foreground));
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-family: "Times New Roman", Times, serif;
 }
 
 /* Linear-inspired component classes */
@@ -35,14 +36,14 @@ body {
   }
   
   .btn-secondary {
-    @apply bg-gray-100 text-gray-900 hover:bg-gray-200 
-           dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700
-           focus-visible:ring-gray-400;
+    @apply bg-accent-50 text-accent-900 hover:bg-accent-100 
+           dark:bg-accent-100 dark:text-accent-800 dark:hover:bg-accent-200
+           focus-visible:ring-accent-300;
   }
   
   .input {
-    @apply block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder:text-gray-400
+    @apply block w-full rounded-md border border-accent-300 bg-white px-3 py-2 text-accent-900 placeholder:text-accent-400
            focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500
-           dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500;
+           dark:border-accent-200 dark:bg-accent-50 dark:text-accent-800 dark:placeholder:text-accent-500;
   }
 }
