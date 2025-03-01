@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+const defaultTheme = require('tailwindcss/defaultTheme');
+
 module.exports = {
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
@@ -7,6 +9,12 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        mono: ["Berkeley Mono", ...defaultTheme.fontFamily.mono],
+        sans: ["source-sans-3", ...defaultTheme.fontFamily.sans],
+        serif: ["p22-mackinac-pro", ...defaultTheme.fontFamily.serif],
+        cursive: ["handsome-pro", defaultTheme.fontFamily.sans],
+      },
       colors: {
         // Anthropic-inspired colors with beige tones
         accent: {

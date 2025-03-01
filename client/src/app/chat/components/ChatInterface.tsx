@@ -4,6 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { ChatInterfaceProps, Message } from "../types";
 import ReactMarkdown from "react-markdown";
 
+// Custom rendering components for markdown to ensure proper styling
+const MarkdownComponents = {
+  p: ({node, ...props}) => <p className="my-1" {...props} />,
+  pre: ({node, ...props}) => <pre className="my-2" {...props} />,
+  code: ({node, inline, ...props}) => 
+    inline ? <code {...props} /> : <code className="block p-2" {...props} />
+};
+
 export default function ChatInterface({
   messages,
   loading,
@@ -116,8 +124,8 @@ export default function ChatInterface({
                         {completedMessage.subject || `Chat ${idx + 1}`}
                       </div>
                       <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm flex-1 border border-accent-200 dark:border-accent-300">
-                        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
-                          <ReactMarkdown>{completedMessage.content}</ReactMarkdown>
+                        <div className="text-base leading-relaxed font-serif markdown-content">
+                          <ReactMarkdown components={MarkdownComponents}>{completedMessage.content}</ReactMarkdown>
                         </div>
                       </div>
                     </div>
@@ -137,8 +145,8 @@ export default function ChatInterface({
                     </div>
                     <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm flex-1 border border-accent-200 dark:border-accent-300">
                       {content !== null ? (
-                        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
-                          <ReactMarkdown>{content}</ReactMarkdown>
+                        <div className="text-base leading-relaxed font-serif markdown-content">
+                          <ReactMarkdown components={MarkdownComponents}>{content}</ReactMarkdown>
                           <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
                         </div>
                       ) : (
@@ -173,8 +181,8 @@ export default function ChatInterface({
                       {taskSubjects[0]}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
-                    <ReactMarkdown>{streamingMessages[0] || ""}</ReactMarkdown>
+                  <div className="text-base leading-relaxed font-serif markdown-content">
+                    <ReactMarkdown components={MarkdownComponents}>{streamingMessages[0] || ""}</ReactMarkdown>
                     <span className="inline-block w-1 h-4 ml-1 bg-accent-500 animate-pulse"></span>
                   </div>
                 </div>
@@ -311,8 +319,8 @@ function MessageComponent({ message }: { message: Message }) {
             {message.subject ? message.subject : `Chat ${message.chat_id + 1}`}
           </div>
         )}
-        <div className="whitespace-pre-wrap text-base leading-relaxed font-serif markdown-content">
-          <ReactMarkdown>{message.content}</ReactMarkdown>
+        <div className="text-base leading-relaxed font-serif markdown-content">
+          <ReactMarkdown components={MarkdownComponents}>{message.content}</ReactMarkdown>
         </div>
       </div>
     </div>
