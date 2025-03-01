@@ -138,3 +138,31 @@ class TaskDecomposer:
             "tasks": tasks,
             "summary": decomposition_summary.group(1).strip() if decomposition_summary else ""
         }
+
+class SynthesisGenerator:
+    """Handles synthesis of parallel task results into a final response"""
+    
+    def __init__(self, llm_provider: LLMProvider, prompt_template: str):
+        self.llm_provider = llm_provider
+        self.prompt_template = prompt_template
+    
+    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> str:
+        """Generate a synthesized response from multiple task results"""
+        # Format the synthesis prompt
+        task_results_text = ""
+        for i, result in enumerate(task_results):
+            subject = result["subject"]
+            content = result["content"]
+            task_results_text += f"RESULT {i+1} - {subject}:\n{content}\n\n"
+        
+        synthesis_prompt = self.prompt_template.format(
+            user_query=user_query,
+            task_results=task_results_text
+        )
+        
+        # Call LLM for synthesis
+        response = await self.llm_provider.generate_completion_sync([
+            {"role": "user", "content": synthesis_prompt}
+        ])
+        
+        return response["content"]

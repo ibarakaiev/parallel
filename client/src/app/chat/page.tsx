@@ -9,6 +9,8 @@ const MAX_CONCURRENT_CHATS = 4;
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [currentReasoningMessages, setCurrentReasoningMessages] = useState<Message[]>([]);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [decomposing, setDecomposing] = useState(false);
   const [streamingMessages, setStreamingMessages] = useState<
@@ -17,8 +19,6 @@ export default function ChatPage() {
   const [taskSubjects, setTaskSubjects] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [numParallelChats, setNumParallelChats] = useState(1);
-
-  // This component now uses SSE instead of WebSockets
 
   // Debug streaming message changes
   useEffect(() => {
@@ -30,6 +30,10 @@ export default function ChatPage() {
     setConnected(false);
   }, []);
 
+  const toggleReasoningExpanded = () => {
+    setReasoningExpanded(!reasoningExpanded);
+  };
+
   // Handle processing SSE events
   const processSSEEvent = useCallback((eventData: any) => {
     try {
@@ -38,66 +42,149 @@ export default function ChatPage() {
       switch (eventData.type) {
         case "thinking_start":
           console.log("Thinking started:", eventData.content);
-          setDecomposing(true);
+          
+          // Check if this is a main thinking step or a subtask
+          const thinkingStep = eventData.metadata?.thinking_step || 1;
+          const isSubtask = eventData.metadata?.subtask || false;
+          const subject = eventData.metadata?.subject || "";
+          
+          if (thinkingStep === 1) {
+            // This is the main decomposition step
+            setDecomposing(true);
+            
+            // Add this as a reasoning message
+            const reasoningMessage: Message = {
+              role: "assistant",
+              content: eventData.content || "Analyzing query...",
+              is_reasoning: true,
+              reasoning_step: thinkingStep,
+              subject: "Query Analysis"
+            };
+            // Only add to current reasoning for this request
+            setCurrentReasoningMessages(prev => [...prev, reasoningMessage]);
+          } else if (isSubtask) {
+            // This is a parallel subtask
+            // If this is the first subtask, clear previous reasoning messages for this step
+            const existingSubtasks = currentReasoningMessages.filter(
+              msg => msg.reasoning_step === thinkingStep && msg.is_reasoning
+            );
+            
+            if (existingSubtasks.length === 0) {
+              // Add a header message for this reasoning step
+              const reasoningHeaderMessage: Message = {
+                role: "assistant",
+                content: "Processing parallel subtasks...",
+                is_reasoning: true,
+                reasoning_step: thinkingStep,
+                subject: "Parallel Processing"
+              };
+              // Only add to current reasoning for this request
+              setCurrentReasoningMessages(prev => [...prev, reasoningHeaderMessage]);
+            }
+            
+            // Initialize a streaming message for this subtask
+            const taskIndex = eventData.metadata?.task_index;
+            if (taskIndex !== undefined) {
+              setStreamingMessages(prev => ({
+                ...prev,
+                [taskIndex]: ""
+              }));
+            }
+          }
           break;
           
         case "thinking_end":
           console.log("Thinking ended with summary:", eventData.content);
-          // Set the number of parallel chats based on the metadata
-          const taskCount = eventData.metadata?.task_count || 1;
-          const subjects = eventData.metadata?.task_subjects || [];
-          setNumParallelChats(taskCount);
-          setTaskSubjects(subjects);
           
-          // Initialize UI grid with empty slots for all chats
-          const initialStreamingMessages: Record<number, string> = {};
-          for (let i = 0; i < taskCount; i++) {
-            initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
-          }
-          setStreamingMessages(initialStreamingMessages);
+          // Check which thinking step this is
+          const endThinkingStep = eventData.metadata?.thinking_step || 1;
+          const endIsSubtask = eventData.metadata?.subtask || false;
           
-          // End the decomposing state
-          setDecomposing(false);
+          if (endThinkingStep === 1) {
+            // This is the end of the decomposition step
+            // Set the number of parallel chats based on the metadata
+            const taskCount = eventData.metadata?.task_count || 1;
+            const subjects = eventData.metadata?.task_subjects || [];
+            setNumParallelChats(taskCount);
+            setTaskSubjects(subjects);
+            
+            // Update the reasoning message with the final content
+            const updatedReasoningMessage: Message = {
+              role: "assistant",
+              content: eventData.content || "Query analyzed.",
+              is_reasoning: true,
+              reasoning_step: endThinkingStep,
+              subject: "Query Analysis"
+            };
+            
+            // Replace the thinking_start message with the complete content
+            // Only update current reasoning messages for this request
+            setCurrentReasoningMessages(prev => 
+              prev.map(msg => 
+                (msg.reasoning_step === endThinkingStep && !msg.chat_id) 
+                  ? updatedReasoningMessage 
+                  : msg
+              )
+            );
+            
+            // Initialize UI grid with empty slots for all chats
+            const initialStreamingMessages: Record<number, string> = {};
+            for (let i = 0; i < taskCount; i++) {
+              initialStreamingMessages[i] = ""; // Initialize all slots with empty strings
+            }
+            setStreamingMessages(initialStreamingMessages);
+            
+            // End the decomposing state
+            setDecomposing(false);
 
-          // Clear any previous completed messages with chat_id
-          setMessages((prev) =>
-            prev.filter(
-              (msg) =>
-                msg.role !== "assistant" || msg.chat_id === undefined,
-            ),
-          );
-          break;
-
-        case "stream_start":
-          const taskIndex = eventData.metadata?.task_index;
-          const subject = eventData.metadata?.subject;
-          console.log(`Stream started for task ${taskIndex} with subject: ${subject || 'unknown'}`);
-          
-          // If we received a subject, add it to the taskSubjects array
-          if (subject !== undefined && taskIndex !== undefined) {
-            setTaskSubjects(prev => {
-              const newSubjects = [...prev];
-              newSubjects[taskIndex] = subject;
-              return newSubjects;
-            });
-          }
-          
-          // Initialize streaming message for this chat
-          if (taskIndex !== undefined) {
-            setStreamingMessages((prev) => ({
-              ...prev,
-              [taskIndex]: "",
-            }));
+            // Clear any previous completed messages that should be replaced
+            setMessages((prev) =>
+              prev.filter(
+                (msg) =>
+                  msg.role !== "assistant" || 
+                  (msg.is_final_response === true) // Keep final responses
+              ),
+            );
+          } else if (endIsSubtask) {
+            // This is the end of a parallel subtask thinking step
+            const taskIndex = eventData.metadata?.task_index;
+            const subject = eventData.metadata?.subject || `Task ${taskIndex !== undefined ? taskIndex + 1 : ''}`;
+            
+            if (eventData.content && taskIndex !== undefined) {
+              // Create a reasoning message for this subtask result
+              const subtaskReasoningMessage: Message = {
+                role: "assistant",
+                content: eventData.content,
+                is_reasoning: true,
+                reasoning_step: endThinkingStep,
+                subject: subject,
+                chat_id: taskIndex
+              };
+              
+              // Add only to current reasoning messages
+              setCurrentReasoningMessages(prev => [...prev, subtaskReasoningMessage]);
+              
+              // Clear streaming message for this task
+              setStreamingMessages(prev => {
+                const newState = { ...prev };
+                delete newState[taskIndex];
+                return newState;
+              });
+            }
           }
           break;
 
         case "content_chunk":
+          // Handle content chunk for subtask reasoning
           const chatIndex = eventData.metadata?.task_index;
+          const isReasoningChunk = eventData.metadata?.thinking_step !== undefined;
+          
           if (eventData.content && chatIndex !== undefined) {
             console.log(
-              `Chunk for chat ${chatIndex} received:`,
+              `Chunk for ${isReasoningChunk ? 'reasoning' : 'response'} chat ${chatIndex} received:`,
               eventData.content.substring(0, 20) + "...",
             );
+            
             // Append new content to streaming message for this chat
             setStreamingMessages((prev) => {
               const prevContent = prev[chatIndex] || "";
@@ -109,32 +196,22 @@ export default function ChatPage() {
           }
           break;
 
-        case "stream_end":
-          const endTaskIndex = eventData.metadata?.task_index;
-          const endSubject = eventData.metadata?.subject;
-          console.log(`Stream ended for task ${endTaskIndex} with subject: ${endSubject || 'unknown'}`);
+        case "final_response":
+          console.log("Final synthesized response received");
           
-          // Streaming ended, add the complete message
-          if (eventData.content && endTaskIndex !== undefined) {
-            // Get subject from event metadata or from taskSubjects array if available
-            let finalSubject = endSubject;
-            if (!finalSubject && endTaskIndex < taskSubjects.length) {
-              finalSubject = taskSubjects[endTaskIndex];
-            }
-            
-            const newAssistantMessage: Message = {
+          // This is the final synthesized response from all parallel tasks
+          if (eventData.content) {
+            const finalResponseMessage: Message = {
               role: "assistant",
               content: eventData.content,
-              chat_id: endTaskIndex,
-              subject: finalSubject
+              is_final_response: true
             };
-            setMessages((prev) => [...prev, newAssistantMessage]);
-
-            // Clear streaming message for this chat
-            setStreamingMessages((prev) => {
-              const newState = { ...prev };
-              delete newState[endTaskIndex];
-              return newState;
+            
+            // Add final response to messages
+            setMessages(prev => {
+              // Remove any previous final responses
+              const filteredMessages = prev.filter(msg => !msg.is_final_response);
+              return [...filteredMessages, finalResponseMessage];
             });
           }
           break;
@@ -143,6 +220,9 @@ export default function ChatPage() {
           if (eventData.metadata?.status === "all_complete") {
             console.log(`All ${eventData.metadata.task_count} tasks completed`);
             setLoading(false);
+            
+            // Keep reasoning messages visible after completion
+            // No need to clear currentReasoningMessages
           }
           break;
 
@@ -184,7 +264,7 @@ export default function ChatPage() {
     } catch (error) {
       console.error("Error processing SSE event:", error);
     }
-  }, [streamingMessages, taskSubjects]);
+  }, [streamingMessages, taskSubjects, currentReasoningMessages]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || loading) return;
@@ -194,24 +274,68 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, newUserMessage]);
     setLoading(true);
 
-    // Clear any existing streaming messages
+    // Clear any existing streaming messages for the new query
     setStreamingMessages({});
+    
+      // Don't persist reasoning messages between requests
+    // Just clear current reasoning to prepare for the new query
+    setCurrentReasoningMessages([]);
+    
+    // Auto-expand reasoning for the new query
+    setReasoningExpanded(true);
     
     // Reset connection state
     setConnected(false);
 
     try {
       // Create the conversation history including the new message
-      const updatedMessages = [...messages, newUserMessage];
+      // First gather all past messages, filtering out reasoning and parallel task messages
+      const conversationMessages = messages.filter(msg => 
+        // Keep user messages
+        msg.role === "user" ||
+        // Keep assistant messages that are final responses or regular responses
+        (msg.role === "assistant" && 
+         (msg.is_final_response === true || 
+          (!msg.is_reasoning && msg.chat_id === undefined)))
+      );
+      
+      // Keep the full chronological order of messages
+      const updatedMessages = [...conversationMessages, newUserMessage];
+      console.log("Conversation history:", updatedMessages);
       
       // Use fetch to create a streaming response
       const apiUrl = "http://localhost:4000/v1/messages";
       
-      // Create message body for API request
-      const messageBody = updatedMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // For API requests, we need to pass the full conversation history
+      // Only filter out intermediate reasoning messages but keep the proper sequential order
+      
+      // Start with all messages (user + final assistant responses)
+      const messageBody = updatedMessages
+        .filter(msg => 
+          // Include all user messages
+          msg.role === "user" || 
+          // Include only final assistant responses or regular assistant messages (no reasoning or parallel chat)
+          (msg.role === "assistant" && 
+           (msg.is_final_response === true || (!msg.is_reasoning && msg.chat_id === undefined)))
+        )
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+      
+      // Log the full message body for debugging
+      console.log("Final messageBody to send to API:", messageBody);
+        
+      // Log the full API request for debugging
+      console.log("FULL API REQUEST:", {
+        url: apiUrl,
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          messages: messageBody,
+          stream: true
+        }, null, 2)
+      });
       
       // Make the POST request directly
       const response = await fetch(apiUrl, {
@@ -456,6 +580,9 @@ export default function ChatPage() {
           onSendMessage={handleSendMessage}
           decomposing={decomposing}
           taskSubjects={taskSubjects}
+          reasoningMessages={currentReasoningMessages}
+          reasoningExpanded={reasoningExpanded}
+          toggleReasoningExpanded={toggleReasoningExpanded}
         />
       </div>
     </div>

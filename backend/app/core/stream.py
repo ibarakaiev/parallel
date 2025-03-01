@@ -14,6 +14,7 @@ class StreamEventType(Enum):
     STREAM_END = "stream_end"
     ERROR = "error"
     METADATA = "metadata"
+    FINAL_RESPONSE = "final_response"  # Added for the synthesized final response
 
 class StreamEvent:
     """Standardized event format for streaming responses"""

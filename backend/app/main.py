@@ -7,12 +7,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
 
-from app.core.api import AnthropicProvider, TaskDecomposer
+from app.core.api import AnthropicProvider, TaskDecomposer, SynthesisGenerator
 from app.core.stream import StreamEvent, StreamEventType, generate_id
 from app.transport.websocket import WebSocketAdapter
 from app.transport.sse import SSEAdapter
 from app.services.parallel_chat import ParallelChatService
-from app.prompts import MASTER_DECOMPOSITION_PROMPT
+from app.prompts import MASTER_DECOMPOSITION_PROMPT, SYNTHESIS_PROMPT
 
 # Get API key from environment
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -24,6 +24,10 @@ anthropic_provider = AnthropicProvider(api_key=ANTHROPIC_API_KEY)
 decomposer = TaskDecomposer(
     llm_provider=anthropic_provider,
     prompt_template=MASTER_DECOMPOSITION_PROMPT
+)
+synthesizer = SynthesisGenerator(
+    llm_provider=anthropic_provider,
+    prompt_template=SYNTHESIS_PROMPT
 )
 
 app = FastAPI()
@@ -138,6 +142,7 @@ async def messages_endpoint(request: Request):
         service = ParallelChatService(
             llm_provider=anthropic_provider,
             decomposer=decomposer,
+            synthesizer=synthesizer,
             transport=transport,
             max_parallel_tasks=4  # Configurable
         )
@@ -189,7 +194,9 @@ async def websocket_endpoint(websocket: WebSocket):
             service = ParallelChatService(
                 llm_provider=anthropic_provider,
                 decomposer=decomposer,
-                transport=transport
+                synthesizer=synthesizer,
+                transport=transport,
+                max_parallel_tasks=4  # Configurable
             )
             
             # Process the query (will send events through the WebSocket)
