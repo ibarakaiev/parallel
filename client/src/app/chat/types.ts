@@ -6,6 +6,11 @@ export interface Message {
   is_reasoning?: boolean; // Whether this message is part of the reasoning steps
   reasoning_step?: number; // Which reasoning step this message belongs to
   is_final_response?: boolean; // Whether this is the final synthesized response
+  metadata?: {
+    rebranch_iteration?: number; // Which rebranching iteration this message belongs to
+    task_index?: number; // Index of the task within its iteration
+    [key: string]: any; // Allow for additional metadata fields
+  };
 }
 
 export interface ChatInterfaceProps {
@@ -23,7 +28,9 @@ export interface ChatInterfaceProps {
 }
 
 export interface WebSocketMessage {
-  type: 'thinking_start' | 'thinking_update' | 'thinking_end' | 'stream_start' | 'content_chunk' | 
+  type: 'thinking_start' | 'thinking_update' | 'thinking_end' | 
+         'rebranch_start' | 'rebranch_end' |  
+         'stream_start' | 'content_chunk' | 
          'stream_end' | 'error' | 'metadata' | 'final_response';
   chat_id?: number;  // Added for multi-chat support
   content?: string;
@@ -42,5 +49,9 @@ export interface WebSocketMessage {
     subject?: string; // Subject for a specific task
     stage?: string; // Stage of thinking (e.g., "decomposition")
     status?: string; // Status message (e.g., "all_complete")
+    rebranch_iteration?: number; // Which rebranching iteration this is
+    promising_paths?: string[]; // Promising paths for exploring in rebranching
+    new_tasks?: string[]; // New tasks created in rebranching
+    ready_for_synthesis?: boolean; // Whether the current results are ready for synthesis
   };
 }

@@ -3,7 +3,7 @@ import json
 import aiohttp
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, AsyncIterator, Optional, Tuple
+from typing import Dict, List, Any, AsyncIterator, Optional, Tuple, Union
 
 import anthropic
 
@@ -32,7 +32,20 @@ class AnthropicProvider(LLMProvider):
     async def generate_completion(self, messages: List[Dict[str, Any]], 
                                 stream: bool = True, **kwargs) -> AsyncIterator[Dict[str, Any]]:
         """Implementation of streaming completion for Anthropic"""
+        # If not streaming, use the sync method and yield the result
+        if not stream:
+            print("Using non-streaming mode with Anthropic API")
+            result = await self.generate_completion_sync(messages, **kwargs)
+            yield {
+                "content": result["content"],
+                "input_tokens": result["input_tokens"],
+                "output_tokens": result["output_tokens"],
+                "final": True
+            }
+            return
+            
         # Use aiohttp for direct API access with streaming
+        print("Using streaming mode with Anthropic API")
         async with aiohttp.ClientSession() as session:
             api_url = "https://api.anthropic.com/v1/messages"
             headers = {
@@ -41,11 +54,12 @@ class AnthropicProvider(LLMProvider):
                 "content-type": "application/json"
             }
             
+            # Set streaming parameter for Anthropic API call
             payload = {
                 "model": self.model,
                 "max_tokens": kwargs.get("max_tokens", 1024),
                 "messages": messages,
-                "stream": True,
+                "stream": True,  # We use this method only when streaming is enabled
             }
             
             input_tokens = 0
@@ -188,6 +202,162 @@ class TaskDecomposer:
             "output_tokens": output_tokens
         }
 
+class SolutionEvaluator:
+    """Evaluates task results to determine if they're ready for synthesis or need more refinement"""
+    
+    def __init__(self, llm_provider: LLMProvider, evaluation_prompt_template: str, rebranch_prompt_template: str):
+        self.llm_provider = llm_provider
+        self.evaluation_prompt_template = evaluation_prompt_template
+        self.rebranch_prompt_template = rebranch_prompt_template
+        
+    async def evaluate_results(self, user_query: str, task_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Evaluate if task results are sufficient or need further branching
+        
+        Returns:
+            Dict containing:
+                - "ready_for_synthesis": bool indicating if ready for synthesis
+                - "explanation": explanation of the evaluation
+                - "promising_paths": list of promising approaches if not ready
+                - "input_tokens"/"output_tokens": token usage
+        """
+        # Format the evaluation prompt
+        task_results_text = ""
+        for i, result in enumerate(task_results):
+            subject = result["subject"]
+            content = result["content"]
+            task_results_text += f"RESULT {i+1} - {subject}:\n{content}\n\n"
+        
+        evaluation_prompt = self.evaluation_prompt_template.format(
+            user_query=user_query,
+            task_results=task_results_text
+        )
+        
+        # Call LLM for evaluation
+        response = await self.llm_provider.generate_completion_sync([
+            {"role": "user", "content": evaluation_prompt}
+        ])
+        
+        evaluation_result = response["content"]
+        
+        # Extract token usage
+        input_tokens = response.get("input_tokens", 0)
+        output_tokens = response.get("output_tokens", 0)
+        
+        # Parse the evaluation result
+        import re
+        ready_match = re.search(r'READY_FOR_SYNTHESIS:\s*(true|false)', evaluation_result, re.IGNORECASE)
+        explanation_match = re.search(r'EXPLANATION:(.*?)(?:PROMISING_PATHS:|$)', evaluation_result, re.DOTALL)
+        
+        if not ready_match:
+            # Default to ready if we couldn't parse the result
+            return {
+                "ready_for_synthesis": True,
+                "explanation": "Unable to parse evaluation result, proceeding with synthesis.",
+                "promising_paths": [],
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
+            }
+        
+        ready_for_synthesis = ready_match.group(1).lower() == "true"
+        explanation = explanation_match.group(1).strip() if explanation_match else ""
+        
+        promising_paths = []
+        if not ready_for_synthesis:
+            paths_match = re.search(r'PROMISING_PATHS:(.*?)(?:$)', evaluation_result, re.DOTALL)
+            if paths_match:
+                paths_text = paths_match.group(1).strip()
+                # Extract numbered paths (1. Path description, 2. Path description, etc.)
+                path_matches = re.findall(r'\d+\.\s*(.*?)(?=\d+\.\s*|\Z)', paths_text + "\n0. ", re.DOTALL)
+                promising_paths = [path.strip() for path in path_matches if path.strip()]
+        
+        return {
+            "ready_for_synthesis": ready_for_synthesis,
+            "explanation": explanation,
+            "promising_paths": promising_paths,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
+        }
+    
+    async def generate_new_subtasks(self, user_query: str, task_results: List[Dict[str, Any]], 
+                                   promising_paths: List[str], max_tasks: int = 4) -> Dict[str, Any]:
+        """Generate new subtasks based on promising paths identified in evaluation
+        
+        Returns:
+            Dict with the same structure as TaskDecomposer.decompose_query result
+        """
+        # Format the rebranch prompt with promising paths
+        task_results_text = ""
+        for i, result in enumerate(task_results):
+            subject = result["subject"]
+            content = result["content"]
+            task_results_text += f"RESULT {i+1} - {subject}:\n{content}\n\n"
+        
+        promising_paths_text = "\n".join([f"{i+1}. {path}" for i, path in enumerate(promising_paths)])
+        
+        rebranch_prompt = self.rebranch_prompt_template.format(
+            user_query=user_query,
+            task_results=task_results_text,
+            promising_paths=promising_paths_text
+        )
+        
+        # Call LLM for rebranching
+        response = await self.llm_provider.generate_completion_sync([
+            {"role": "user", "content": rebranch_prompt}
+        ])
+        
+        decomposition_result = response["content"]
+        
+        # Extract token usage
+        input_tokens = response.get("input_tokens", 0)
+        output_tokens = response.get("output_tokens", 0)
+        
+        # Parse the decomposition result using regex (same as TaskDecomposer)
+        import re
+        decomposition_summary = re.search(r'DECOMPOSITION_SUMMARY:(.*?)(?:PARALLEL_TASKS_COUNT:|$)', decomposition_result, re.DOTALL)
+        tasks_count = re.search(r'PARALLEL_TASKS_COUNT:\s*(\d+)', decomposition_result)
+        
+        if not (decomposition_summary and tasks_count):
+            return {
+                "tasks": [{"subject": "Further Analysis", "prompt": user_query}],
+                "summary": "Unable to generate new subtasks, proceeding with direct analysis.",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
+            }
+        
+        count = min(int(tasks_count.group(1)), max_tasks)  # Ensure we don't exceed max
+        
+        # Get each task subject and prompt
+        tasks = []
+        
+        for i in range(1, count + 1):
+            subject_pattern = f'TASK_{i}_SUBJECT:(.*?)(?:TASK_{i}_PROMPT:|$)'
+            prompt_pattern = f'TASK_{i}_PROMPT:(.*?)(?:TASK_{i+1}_SUBJECT:|SYNTHESIS_RECOMMENDATION:|$)'
+            
+            subject_match = re.search(subject_pattern, decomposition_result, re.DOTALL)
+            prompt_match = re.search(prompt_pattern, decomposition_result, re.DOTALL)
+            
+            if subject_match and prompt_match:
+                subject = subject_match.group(1).strip()
+                prompt = prompt_match.group(1).strip()
+                
+                tasks.append({"subject": subject, "prompt": prompt})
+        
+        # If we failed to get the right number of tasks, fall back to simpler approach
+        if len(tasks) != count:
+            return {
+                "tasks": [{"subject": "Further Analysis", "prompt": user_query}],
+                "summary": "Unable to properly generate new subtasks.",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
+            }
+            
+        return {
+            "tasks": tasks,
+            "summary": decomposition_summary.group(1).strip() if decomposition_summary else "Refining promising solution paths.",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
+        }
+
 class SynthesisGenerator:
     """Handles synthesis of parallel task results into a final response"""
     
@@ -195,7 +365,7 @@ class SynthesisGenerator:
         self.llm_provider = llm_provider
         self.prompt_template = prompt_template
     
-    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]]) -> AsyncIterator[Dict[str, Any]]:
+    async def generate_synthesis(self, user_query: str, task_results: List[Dict[str, Any]], stream: bool = True) -> AsyncIterator[Dict[str, Any]]:
         """Generate a synthesized response from multiple task results with streaming"""
         # Format the synthesis prompt
         task_results_text = ""
@@ -209,11 +379,27 @@ class SynthesisGenerator:
             task_results=task_results_text
         )
         
-        # Track token usage
+        # OPTIMIZATION: For non-streaming mode, use the sync method directly to avoid any streaming overhead
+        if not stream:
+            print("Using non-streaming synthesis generation")
+            result = await self.llm_provider.generate_completion_sync([
+                {"role": "user", "content": synthesis_prompt}
+            ])
+            # Yield the entire content as one chunk
+            yield {
+                "content": result["content"],
+                "input_tokens": result.get("input_tokens", 0),
+                "output_tokens": result.get("output_tokens", 0),
+                "final": True
+            }
+            return
+        
+        # Track token usage for streaming mode
         input_tokens = 0
         output_tokens = 0
         
         # Call LLM for synthesis with streaming
+        print(f"Generating synthesis with streaming")
         async for chunk in self.llm_provider.generate_completion([
             {"role": "user", "content": synthesis_prompt}
         ], stream=True):

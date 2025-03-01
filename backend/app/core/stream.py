@@ -9,6 +9,8 @@ class StreamEventType(Enum):
     THINKING_START = "thinking_start"
     THINKING_UPDATE = "thinking_update"
     THINKING_END = "thinking_end"
+    REBRANCH_START = "rebranch_start"  # New event type for starting a rebranch phase
+    REBRANCH_END = "rebranch_end"      # New event type for ending a rebranch phase
     STREAM_START = "stream_start"
     CONTENT_CHUNK = "content_chunk"
     STREAM_END = "stream_end"

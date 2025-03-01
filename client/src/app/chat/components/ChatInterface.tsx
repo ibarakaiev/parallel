@@ -10,7 +10,11 @@ import { ReactNode } from "react";
 
 const MarkdownComponents = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  p: ({ children, ...props }: any) => <p className="my-1" {...props}>{children}</p>,
+  p: ({ children, ...props }: any) => (
+    <p className="my-1" {...props}>
+      {children}
+    </p>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pre: ({ ...props }: any) => <pre className="my-2" {...props} />,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -18,19 +22,50 @@ const MarkdownComponents = {
     inline ? <code {...props} /> : <code className="block p-2" {...props} />,
   // Add support for headers
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h1: ({ children, ...props }: any) => <h1 className="text-2xl font-bold mt-4 mb-2" {...props}>{children}</h1>,
+  h1: ({ children, ...props }: any) => (
+    <h1 className="text-2xl font-bold mt-4 mb-2" {...props}>
+      {children}
+    </h1>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h2: ({ children, ...props }: any) => <h2 className="text-xl font-bold mt-3 mb-2" {...props}>{children}</h2>,
+  h2: ({ children, ...props }: any) => (
+    <h2 className="text-xl font-bold mt-3 mb-2" {...props}>
+      {children}
+    </h2>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h3: ({ children, ...props }: any) => <h3 className="text-lg font-bold mt-2 mb-1" {...props}>{children}</h3>,
+  h3: ({ children, ...props }: any) => (
+    <h3 className="text-lg font-bold mt-2 mb-1" {...props}>
+      {children}
+    </h3>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ul: ({ children, ...props }: any) => <ul className="list-disc pl-5 my-2" {...props}>{children}</ul>,
+  ul: ({ children, ...props }: any) => (
+    <ul className="list-disc pl-5 my-2" {...props}>
+      {children}
+    </ul>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ol: ({ children, ...props }: any) => <ol className="list-decimal pl-5 my-2" {...props}>{children}</ol>,
+  ol: ({ children, ...props }: any) => (
+    <ol className="list-decimal pl-5 my-2" {...props}>
+      {children}
+    </ol>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  li: ({ children, ...props }: any) => <li className="my-1" {...props}>{children}</li>,
+  li: ({ children, ...props }: any) => (
+    <li className="my-1" {...props}>
+      {children}
+    </li>
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blockquote: ({ children, ...props }: any) => <blockquote className="border-l-4 border-accent-300 pl-4 my-2 italic" {...props}>{children}</blockquote>,
+  blockquote: ({ children, ...props }: any) => (
+    <blockquote
+      className="border-l-4 border-accent-300 pl-4 my-2 italic"
+      {...props}
+    >
+      {children}
+    </blockquote>
+  ),
 };
 
 export default function ChatInterface({
@@ -48,7 +83,9 @@ export default function ChatInterface({
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [expandedTask, setExpandedTask] = useState<number | null>(null);
-  const [localTaskOutputs, setLocalTaskOutputs] = useState<Record<number, string>>({});
+  const [localTaskOutputs, setLocalTaskOutputs] = useState<
+    Record<number, string>
+  >({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -65,50 +102,93 @@ export default function ChatInterface({
       textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     }
   }, [input]);
-  
+
   // Update localTaskOutputs when taskOutputs from props change
   useEffect(() => {
     if (Object.keys(taskOutputs).length > 0) {
-      setLocalTaskOutputs(prev => ({
+      setLocalTaskOutputs((prev) => ({
         ...prev,
-        ...taskOutputs
+        ...taskOutputs,
       }));
     }
   }, [taskOutputs]);
-  
+
   // Function to toggle expanded task
-  const toggleExpandTask = (idx: number) => {
-    setExpandedTask(expandedTask === idx ? null : idx);
+  const toggleExpandTask = (idx: number, iteration?: number) => {
+    // Include iteration info in the expanded task key
+    const expandedKey = iteration !== undefined ? `${iteration}-${idx}` : idx;
+    setExpandedTask(expandedTask === expandedKey ? null : expandedKey);
     
-    // If we don't have output for this task yet in our local state, check server output first
-    if (!localTaskOutputs[idx]) {
-      if (taskOutputs[idx]) {
-        // Use real task output from the server if available
-        setLocalTaskOutputs(prev => ({ ...prev, [idx]: taskOutputs[idx] }));
-      } else {
-        // Simulate streaming output for the task as a fallback
-        const mockOutput = `Processing task: ${taskSubjects[idx]}\n\nAnalyzing data...\n`;
-        setLocalTaskOutputs(prev => ({ ...prev, [idx]: mockOutput }));
-        
-        // Simulate streaming updates
-        let counter = 0;
-        const interval = setInterval(() => {
-          counter++;
-          setLocalTaskOutputs(prev => ({
-            ...prev,
-            [idx]: prev[idx] + `Step ${counter}: ${Math.random() > 0.5 ? 'Found relevant information.' : 'Analyzing sources.'}\n`
-          }));
-          
-          // Stop after some iterations
-          if (counter >= 5) {
-            clearInterval(interval);
-            setLocalTaskOutputs(prev => ({
-              ...prev,
-              [idx]: prev[idx] + `\nTask complete. Results integrated into final response.`
-            }));
-          }
-        }, 1000);
+    // If iteration is provided, find that specific task output
+    if (iteration !== undefined) {
+      const outputKey = `${iteration}-${idx}`;
+      if (taskOutputs[outputKey]) {
+        // Use real task output from the server
+        setLocalTaskOutputs((prev) => ({ ...prev, [expandedKey]: taskOutputs[outputKey] }));
+        return;
       }
+    } else {
+      // If no iteration provided, find all task outputs that match this index across iterations
+      const outputKeys = Object.keys(taskOutputs).filter(key => {
+        // Task output keys are stored as "iteration-index"
+        const parts = key.split('-');
+        if (parts.length === 2) {
+          const taskIndex = parseInt(parts[1]);
+          return taskIndex === idx;
+        }
+        return false;
+      });
+      
+      // Find the most recent iteration for this task
+      // Sort by iteration number (first part of the key) in descending order
+      outputKeys.sort((a, b) => {
+        const iterationA = parseInt(a.split('-')[0]);
+        const iterationB = parseInt(b.split('-')[0]);
+        return iterationB - iterationA;
+      });
+      
+      // If we have at least one output for this task, use it
+      if (outputKeys.length > 0) {
+        const latestOutputKey = outputKeys[0];
+        const latestOutput = taskOutputs[latestOutputKey];
+        
+        if (latestOutput) {
+          // Use real task output from the server if available
+          setLocalTaskOutputs((prev) => ({ ...prev, [expandedKey]: latestOutput }));
+          return;
+        }
+      }
+    }
+    
+    // If we don't have output for this task yet in our local state or from the server
+    if (!localTaskOutputs[idx]) {
+      // Simulate streaming output for the task as a fallback
+      const taskSubject = taskSubjects[idx] || `Task ${idx + 1}`;
+      const mockOutput = `Processing task: ${taskSubject}\n\nAnalyzing data...\n`;
+      setLocalTaskOutputs((prev) => ({ ...prev, [idx]: mockOutput }));
+
+      // Simulate streaming updates
+      let counter = 0;
+      const interval = setInterval(() => {
+        counter++;
+        setLocalTaskOutputs((prev) => ({
+          ...prev,
+          [idx]:
+            prev[idx] +
+            `Step ${counter}: ${Math.random() > 0.5 ? "Found relevant information." : "Analyzing sources."}\n`,
+        }));
+
+        // Stop after some iterations
+        if (counter >= 5) {
+          clearInterval(interval);
+          setLocalTaskOutputs((prev) => ({
+            ...prev,
+            [idx]:
+              prev[idx] +
+              `\nTask complete. Results integrated into final response.`,
+          }));
+        }
+      }, 1000);
     }
   };
 
@@ -173,14 +253,58 @@ export default function ChatInterface({
   return (
     <div className="flex flex-col flex-1 overflow-hidden bg-accent-50 dark:bg-accent-50">
       {/* Task output panel */}
-      {expandedTask !== null && taskSubjects[expandedTask] && (
-        <TaskOutputPanel 
-          subject={taskSubjects[expandedTask]} 
-          output={localTaskOutputs[expandedTask] || taskOutputs[expandedTask] || "Loading..."} 
-          onClose={() => setExpandedTask(null)} 
-        />
+      {expandedTask !== null && (
+        (() => {
+          // Parse expanded task key to get iteration and index
+          let taskIndex: number;
+          let iteration: number | undefined;
+          
+          if (typeof expandedTask === 'string' && expandedTask.includes('-')) {
+            const parts = expandedTask.toString().split('-');
+            iteration = parseInt(parts[0]);
+            taskIndex = parseInt(parts[1]);
+          } else {
+            taskIndex = Number(expandedTask);
+          }
+          
+          // Get subject from tasksByIteration if available
+          let subject = '';
+          if (iteration !== undefined) {
+            // Find task placeholders with this iteration and index
+            const taskPlaceholder = reasoningMessages.find(msg => 
+              msg.metadata?.is_task === true && 
+              msg.metadata.rebranch_iteration === iteration && 
+              msg.chat_id === taskIndex
+            );
+            if (taskPlaceholder) {
+              subject = taskPlaceholder.subject || `Task ${taskIndex + 1}`;
+            }
+          }
+          
+          // Fallback to taskSubjects if no subject found
+          if (!subject && taskSubjects[taskIndex]) {
+            subject = taskSubjects[taskIndex];
+          }
+          
+          if (!subject) {
+            return null; // Don't render if no subject found
+          }
+          
+          // Get appropriate output
+          const outputKey = iteration !== undefined ? `${iteration}-${taskIndex}` : taskIndex.toString();
+          const output = localTaskOutputs[expandedTask] || taskOutputs[outputKey] || "Loading...";
+          
+          return (
+            <TaskOutputPanel
+              subject={subject}
+              output={output}
+              onClose={() => setExpandedTask(null)}
+              iteration={iteration}
+            />
+          );
+        })()
       )}
-      
+
       {/* Messages container */}
       <div className="flex-1 overflow-y-auto py-6 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto space-y-4">
@@ -191,8 +315,8 @@ export default function ChatInterface({
                 Welcome to <em>Parallel</em>
               </h1>
               <p className="text-center text-accent-700 max-w-md font-sans">
-                Speed up inference and improve accuracy when running prompts
-                that require multiple perspectives
+                Speed up inference and improve quality when running prompts that
+                require multiple perspectives
               </p>
             </div>
           )}
@@ -205,10 +329,14 @@ export default function ChatInterface({
                 <MessageComponent
                   key={`message-component-${index}`}
                   message={message}
-                  reasoningMessages={(message.role === "assistant") ? reasoningMessages : []}
+                  reasoningMessages={
+                    message.role === "assistant" ? reasoningMessages : []
+                  }
                   reasoningExpanded={reasoningExpanded}
                   toggleReasoningExpanded={toggleReasoningExpanded}
-                  taskSubjects={(message.role === "assistant") ? taskSubjects : []}
+                  taskSubjects={
+                    message.role === "assistant" ? taskSubjects : []
+                  }
                 />
               </div>
             ))}
@@ -221,61 +349,47 @@ export default function ChatInterface({
             <div className="flex justify-start">
               <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
                 {/* Thinking dropdown - always show */}
-                  <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
-                    {/* Thinking header - clickable to expand/collapse */}
-                    <div
-                      className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
-                      onClick={toggleReasoningExpanded}
-                    >
-                      <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
-                        <span className="font-medium text-sm">Analysis</span>
-                      </div>
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                        className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? "rotate-180" : ""}`}
-                      >
-                        <path
-                          d="M6 9L12 15L18 9"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
+                  {/* Thinking header - clickable to expand/collapse */}
+                  <div
+                    className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
+                    onClick={toggleReasoningExpanded}
+                  >
+                    <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
+                      <span className="font-medium text-sm">Analysis</span>
                     </div>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? "rotate-180" : ""}`}
+                    >
+                      <path
+                        d="M6 9L12 15L18 9"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
 
-                    {/* Thinking content - collapsible */}
-                    {reasoningExpanded && (
-                      <div className="p-3 border-t border-accent-200 dark:border-accent-300 animate-fadeIn">
-                        {/* General reasoning plan - always show something */}
-                        <div className="mb-3">
-                          <div className="text-sm text-accent-800 dark:text-accent-700">
-                            {reasoningMessages.length > 0 && reasoningMessages[0] ? (
-                              <div>
-                                {reasoningMessages[0].content}
-                              </div>
-                            ) : (streamingMessages && streamingMessages.thinking) ? (
-                              <div>
-                                {streamingMessages.thinking}
-                                <div className="flex items-center gap-2 mt-2">
-                                  <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
-                                  <div
-                                    className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                    style={{ animationDelay: "0.2s" }}
-                                  ></div>
-                                  <div
-                                    className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                    style={{ animationDelay: "0.4s" }}
-                                  ></div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <span>Decomposing query</span>
+                  {/* Thinking content - collapsible */}
+                  {reasoningExpanded && (
+                    <div className="p-3 border-t border-accent-200 dark:border-accent-300 animate-fadeIn">
+                      {/* General reasoning plan - always show something */}
+                      <div className="mb-3">
+                        <div className="text-sm text-accent-800 dark:text-accent-700">
+                          {reasoningMessages.length > 0 &&
+                          reasoningMessages[0] ? (
+                            <div>{reasoningMessages[0].content}</div>
+                          ) : streamingMessages &&
+                            streamingMessages.thinking ? (
+                            <div>
+                              {streamingMessages.thinking}
+                              <div className="flex items-center gap-2 mt-2">
                                 <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
                                 <div
                                   className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
@@ -286,44 +400,91 @@ export default function ChatInterface({
                                   style={{ animationDelay: "0.4s" }}
                                 ></div>
                               </div>
-                            )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span>Decomposing query</span>
+                              <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
+                              <div
+                                className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                style={{ animationDelay: "0.2s" }}
+                              ></div>
+                              <div
+                                className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
+                                style={{ animationDelay: "0.4s" }}
+                              ></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Grid of subtasks - only show in thinking view */}
+                      {taskSubjects && taskSubjects.length > 0 && (
+                        <div>
+                          <div className="text-sm font-medium mb-1">
+                            Subtasks
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {taskSubjects.map((subject, idx) => (
+                              <div
+                                key={`task-subject-${idx}`}
+                                className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                                style={{ animationDelay: `${idx * 100}ms` }}
+                                onClick={() => toggleExpandTask(idx)}
+                              >
+                                <div className="flex-1 mr-1 truncate">
+                                  {subject}
+                                  {/* Small dot to indicate running task - only show when loading */}
+                                  {loading && (
+                                    <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                  )}
+                                </div>
+                                {/* Expand icon */}
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="text-accent-500"
+                                >
+                                  <path
+                                    d="M15 3H21V9"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M9 21H3V15"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M21 3L14 10"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M3 21L10 14"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </div>
+                            ))}
                           </div>
                         </div>
-
-                        {/* Grid of subtasks - only show in thinking view */}
-                        {taskSubjects && taskSubjects.length > 0 && (
-                          <div>
-                            <div className="text-sm font-medium mb-1">
-                              Subtasks
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {taskSubjects.map((subject, idx) => (
-                                <div
-                                  key={`task-subject-${idx}`}
-                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
-                                  style={{ animationDelay: `${idx * 100}ms` }}
-                                  onClick={() => toggleExpandTask(idx)}
-                                >
-                                  <div className="flex-1 mr-1 truncate">
-                                    {subject}
-                                    {/* Small dot to indicate running task - only show when loading */}
-                                    {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
-                                  </div>
-                                  {/* Expand icon */}
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
-                                    <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                  </svg>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Show the final response streaming if available - this is the main content */}
                 {streamingMessages && streamingMessages.final_response ? (
@@ -407,31 +568,311 @@ export default function ChatInterface({
                         {/* Grid of subtasks */}
                         {taskSubjects && taskSubjects.length > 0 && (
                           <div>
-                            <div className="text-sm font-medium mb-1">
-                              Subtasks
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {taskSubjects.map((subject, idx) => (
-                                <div
-                                  key={`task-subject-${idx}`}
-                                  className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
-                                  onClick={() => toggleExpandTask(idx)}
-                                >
-                                  <div className="flex-1 mr-1 truncate">
-                                    {subject}
-                                    {/* Small dot to indicate running task - only show when loading or decomposing */}
-                                    {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                            {/* Render tasks by section with headers */}
+                            {(() => {
+                              // Find all section headers
+                              const sectionHeaders = reasoningMessages
+                                .filter(msg => msg.metadata?.is_subtasks_header)
+                                .sort((a, b) => {
+                                  // Sort by iteration
+                                  const iterA = a.metadata?.rebranch_iteration || 0;
+                                  const iterB = b.metadata?.rebranch_iteration || 0;
+                                  return iterA - iterB;
+                                });
+                                
+                              // If no headers, use a default one
+                              if (sectionHeaders.length === 0) {
+                                sectionHeaders.push({
+                                  role: "assistant",
+                                  content: "Breaking down the query into parallel subtasks for processing.",
+                                  subject: "Initial Subtasks",
+                                  is_reasoning: true,
+                                  metadata: { rebranch_iteration: 0, is_subtasks_header: true }
+                                });
+                              }
+                              
+                              // Group tasks by iteration
+                              const tasksByIteration: Record<number, Array<{subject: string, index: number}>> = {};
+                              
+                              // Get all tasks from reasoning messages, appropriately grouped by iteration
+                              
+                              // First collect all task placeholder messages (these have the most reliable iteration info)
+                              const taskPlaceholders = reasoningMessages
+                                .filter(msg => msg.chat_id !== undefined && msg.metadata?.is_task === true);
+                                
+                              console.log("Task placeholders:", taskPlaceholders.map(tp => 
+                                `${tp.subject} (iter: ${tp.metadata?.rebranch_iteration}, idx: ${tp.chat_id})`));
+                              
+                              // Then add all task result messages (these contain the actual task outputs)
+                              const taskResults = reasoningMessages
+                                .filter(msg => 
+                                  msg.chat_id !== undefined && 
+                                  !msg.metadata?.is_task && 
+                                  !msg.metadata?.is_section_header && 
+                                  !msg.metadata?.is_subtasks_header
+                                );
+                              
+                              // Combine all task-related messages and organize by iteration
+                              const allTaskMessages = [...taskPlaceholders, ...taskResults];
+                                
+                              // Group them by iteration
+                              allTaskMessages.forEach(msg => {
+                                const iteration = msg.metadata?.rebranch_iteration || 0;
+                                if (!tasksByIteration[iteration]) {
+                                  tasksByIteration[iteration] = [];
+                                }
+                                
+                                // Only add if not already present
+                                if (!tasksByIteration[iteration].some(t => t.index === msg.chat_id)) {
+                                  tasksByIteration[iteration].push({
+                                    subject: msg.subject || `Task ${msg.chat_id as number + 1}`,
+                                    index: msg.chat_id as number
+                                  });
+                                }
+                              });
+                              
+                              // If no task placeholders, try to get them from task result messages
+                              if (Object.keys(tasksByIteration).length === 0) {
+                                // Add tasks from task result messages as fallback
+                                reasoningMessages
+                                  .filter(msg => msg.chat_id !== undefined && !msg.metadata?.is_task)
+                                  .forEach(msg => {
+                                    const iteration = msg.metadata?.rebranch_iteration || 0;
+                                    if (!tasksByIteration[iteration]) {
+                                      tasksByIteration[iteration] = [];
+                                    }
+                                    
+                                    const taskSubject = msg.subject || `Task ${msg.chat_id}`;
+                                    // Remove iteration text from subject if present
+                                    const cleanSubject = taskSubject.replace(/ \(Round \d+\)$/, '');
+                                    
+                                    // Only add if not already present
+                                    if (!tasksByIteration[iteration].some(t => t.index === msg.chat_id)) {
+                                      tasksByIteration[iteration].push({
+                                        subject: cleanSubject,
+                                        index: msg.chat_id as number
+                                      });
+                                    }
+                                  });
+                              }
+                              
+                              // Add initial tasks from taskSubjects as last resort
+                              if (!tasksByIteration[0] && taskSubjects.length > 0) {
+                                tasksByIteration[0] = taskSubjects.map((subject, idx) => ({
+                                  subject,
+                                  index: idx
+                                }));
+                              }
+                              
+                              // MODIFIED: Always show initial tasks first, then show later iterations with transition explanations
+                              
+                              // Always render initial subtasks first
+                              const result = [];
+                              
+                              // 1. Add the initial subtasks section
+                              const initialTaskHeader = sectionHeaders.find(h => 
+                                (h.metadata?.rebranch_iteration || 0) === 0
+                              ) || {
+                                subject: "Initial Subtasks",
+                                content: "Breaking down the query into parallel subtasks for processing.",
+                                metadata: { rebranch_iteration: 0 }
+                              };
+                              
+                              const initialTasks = tasksByIteration[0] || [];
+                              
+                              // If we have no initial tasks but have taskSubjects, use those instead
+                              const displayInitialTasks = initialTasks.length > 0 ? initialTasks : 
+                                taskSubjects.map((subject, idx) => ({
+                                  subject,
+                                  index: idx
+                                }));
+                                
+                              // Add initial tasks section
+                              result.push(
+                                <div key="section-initial" className="mb-4">
+                                  {/* Section header */}
+                                  <div className="text-sm font-medium mb-1">
+                                    {initialTaskHeader.subject || "Initial Subtasks"}
                                   </div>
-                                  {/* Expand icon */}
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
-                                    <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                  </svg>
+                                  <div className="text-xs mb-2 text-accent-600">
+                                    {initialTaskHeader.content || "Breaking down the query into parallel subtasks for processing."}
+                                  </div>
+                                  
+                                  {/* Initial tasks */}
+                                  <div className="grid grid-cols-2 gap-2 mb-2">
+                                    {displayInitialTasks.map((task, idx) => {
+                                      return (
+                                        <div
+                                          key={`task-initial-${idx}`}
+                                          className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                                          style={{ animationDelay: `${idx * 100}ms` }}
+                                          onClick={() => toggleExpandTask(task.index, 0)}
+                                        >
+                                          <div className="flex-1 mr-1 truncate">
+                                            {task.subject}
+                                            {/* Small dot to indicate running task */}
+                                            {(loading || decomposing) && (
+                                              <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                            )}
+                                          </div>
+                                          {/* Expand icon */}
+                                          <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="text-accent-500"
+                                          >
+                                            <path
+                                              d="M15 3H21V9"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                            <path
+                                              d="M9 21H3V15"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                            <path
+                                              d="M21 3L14 10"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                            <path
+                                              d="M3 21L10 14"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                          </svg>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              ))}
-                            </div>
+                              );
+                              
+                              // 2. Add sections for each iteration except the initial one
+                              const iterations = sectionHeaders
+                                .filter(header => (header.metadata?.rebranch_iteration || 0) > 0)
+                                .map(header => header.metadata?.rebranch_iteration || 0)
+                                .sort((a, b) => a - b);
+                              
+                              // For each iteration > 0, add a description of what changed before showing tasks
+                              iterations.forEach(iteration => {
+                                // Find rebranch explanation for this iteration from reasoning messages
+                                const rebranchExplanation = reasoningMessages.find(msg => 
+                                  msg.metadata?.rebranch_iteration === iteration && 
+                                  (msg.event_type === "rebranch_end" || msg.metadata?.event_type === "rebranch_end")
+                                );
+                                
+                                // Find header for this iteration
+                                const header = sectionHeaders.find(h => 
+                                  (h.metadata?.rebranch_iteration || 0) === iteration
+                                );
+                                
+                                // Get tasks for this iteration
+                                const tasks = tasksByIteration[iteration] || [];
+                                
+                                // Only add if we have a header or tasks
+                                if (header || tasks.length > 0) {
+                                  result.push(
+                                    <div key={`section-${iteration}`} className="mb-4">
+                                      {/* Add transition explanation between task sets */}
+                                      <div className="p-2 mb-3 bg-accent-50 border-l-4 border-accent-400 text-sm">
+                                        <p className="mb-1 font-medium">After analyzing initial results:</p>
+                                        <p className="text-xs">
+                                          {rebranchExplanation?.content || 
+                                          "Exploring alternative approaches based on the initial findings."}
+                                        </p>
+                                      </div>
+                                      
+                                      {/* Section header */}
+                                      <div className="text-sm font-medium mb-1">
+                                        {header?.subject || `Further Exploration (Round ${iteration})`}
+                                      </div>
+                                      <div className="text-xs mb-2 text-accent-600">
+                                        {header?.content || 
+                                        `Exploring additional perspectives to better answer the query.`}
+                                      </div>
+                                      
+                                      {/* Tasks for this section */}
+                                      <div className="grid grid-cols-2 gap-2 mb-2">
+                                        {tasks.map((task, idx) => {
+                                          // Generate a unique task key
+                                          const taskDisplayKey = `${iteration}-${task.index}`;
+                                          return (
+                                            <div
+                                              key={`task-${taskDisplayKey}`}
+                                              className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                                              style={{ animationDelay: `${idx * 100}ms` }}
+                                              onClick={() => toggleExpandTask(task.index, iteration)}
+                                            >
+                                              <div className="flex-1 mr-1 truncate">
+                                                {task.subject}
+                                                {/* Small dot to indicate running task */}
+                                                {(loading || decomposing) && (
+                                                  <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                                )}
+                                              </div>
+                                              {/* Expand icon */}
+                                              <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                className="text-accent-500"
+                                              >
+                                                <path
+                                                  d="M15 3H21V9"
+                                                  stroke="currentColor"
+                                                  strokeWidth="2"
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                                <path
+                                                  d="M9 21H3V15"
+                                                  stroke="currentColor"
+                                                  strokeWidth="2"
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                                <path
+                                                  d="M21 3L14 10"
+                                                  stroke="currentColor"
+                                                  strokeWidth="2"
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                                <path
+                                                  d="M3 21L10 14"
+                                                  stroke="currentColor"
+                                                  strokeWidth="2"
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                              </svg>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                              });
+                              
+                              return result;
+                            })()}
+                            
                           </div>
                         )}
                       </div>
@@ -459,7 +900,8 @@ export default function ChatInterface({
           {/* Loading indicator (only shown when not streaming and not decomposing) */}
           {loading &&
             !decomposing &&
-            (!streamingMessages || Object.keys(streamingMessages).length === 0) && (
+            (!streamingMessages ||
+              Object.keys(streamingMessages).length === 0) && (
               <div className="flex justify-start">
                 <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
                   {/* Thinking dropdown */}
@@ -527,14 +969,47 @@ export default function ChatInterface({
                                     <div className="flex-1 mr-1 truncate">
                                       {subject}
                                       {/* Small dot to indicate running task - only show when loading */}
-                                      {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                      {loading && (
+                                        <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
+                                      )}
                                     </div>
                                     {/* Expand icon */}
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
-                                      <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                      <path d="M9 21H3V15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                      <path d="M21 3L14 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                      <path d="M3 21L10 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="text-accent-500"
+                                    >
+                                      <path
+                                        d="M15 3H21V9"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M9 21H3V15"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M21 3L14 10"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M3 21L10 14"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
                                     </svg>
                                   </div>
                                 ))}
@@ -632,26 +1107,50 @@ export default function ChatInterface({
 }
 
 // TaskOutputPanel component
-function TaskOutputPanel({ 
-  subject, 
-  output, 
-  onClose 
-}: { 
-  subject: string; 
-  output: string; 
+function TaskOutputPanel({
+  subject,
+  output,
+  onClose,
+  iteration,
+}: {
+  subject: string;
+  output: string;
   onClose: () => void;
+  iteration?: number;
 }) {
+  // Add iteration info to the panel title if available
+  const displaySubject = iteration !== undefined ? 
+    `${subject} (Round ${iteration + 1})` : 
+    subject;
   return (
     <div className="fixed right-0 top-0 bottom-0 w-1/3 bg-white dark:bg-background-secondary border-l border-accent-200 dark:border-accent-300 z-10 shadow-lg flex flex-col">
       <div className="p-4 border-b border-accent-200 dark:border-accent-300 flex justify-between items-center">
-        <h3 className="font-medium text-accent-900">Task: {subject}</h3>
-        <button 
+        <h3 className="font-medium text-accent-900">Task: {displaySubject}</h3>
+        <button
           onClick={onClose}
           className="text-accent-500 hover:text-accent-700"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M6 6L18 18"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </div>

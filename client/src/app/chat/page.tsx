@@ -147,10 +147,26 @@ export default function ChatPage() {
               const subjects = eventData.metadata?.task_subjects || [];
               setNumParallelChats(taskCount);
 
-              // Only set task subjects if they haven't been set yet by individual
-              // thinking_start events for each subtask
+              // Add task subjects to both taskSubjects (for backward compatibility)
+              // and also to reasoningMessages for iteration tracking
               if (taskSubjects.length === 0) {
                 setTaskSubjects(subjects);
+                
+                // Also add task placeholders to reasoningMessages for improved tracking
+                const taskPlaceholders = subjects.map((subject, idx) => ({
+                  role: "assistant" as const,
+                  content: "",  // Empty content, we don't need to show this
+                  is_reasoning: true,
+                  chat_id: idx,  // Use the index as chat_id
+                  subject: subject,
+                  metadata: {
+                    rebranch_iteration: 0,  // Initial tasks are iteration 0
+                    is_task: true  // Flag to indicate this is a task placeholder
+                  }
+                }));
+                
+                // Add these placeholders to current reasoning messages
+                setCurrentReasoningMessages(prev => [...prev, ...taskPlaceholders]);
               }
 
               // Update the reasoning message with the final content
@@ -161,16 +177,33 @@ export default function ChatPage() {
                 reasoning_step: endThinkingStep,
                 subject: "Query Analysis",
               };
+              
+              // Also add a subtasks header for the initial set of tasks
+              const initialSubtasksHeader: Message = {
+                role: "assistant",
+                content: "Breaking down the query into initial subtasks for parallel processing.",
+                is_reasoning: true,
+                reasoning_step: endThinkingStep,
+                subject: "Initial Subtasks",
+                metadata: {
+                  rebranch_iteration: 0,
+                  is_subtasks_header: true
+                }
+              };
 
-              // Replace the thinking_start message with the complete content
+              // Replace the thinking_start message with the complete content and add the subtasks header
               // Only update current reasoning messages for this request
-              setCurrentReasoningMessages((prev) =>
-                prev.map((msg) =>
+              setCurrentReasoningMessages((prev) => {
+                // First map to replace the analysis message
+                const updatedMessages = prev.map((msg) =>
                   msg.reasoning_step === endThinkingStep && !msg.chat_id
                     ? updatedReasoningMessage
-                    : msg,
-                ),
-              );
+                    : msg
+                );
+                
+                // Then add the subtasks header message
+                return [...updatedMessages, initialSubtasksHeader];
+              });
 
               // Only initialize chat slots that haven't already been created
               // by individual thinking_start events
@@ -210,16 +243,50 @@ export default function ChatPage() {
               const subject =
                 eventData.metadata?.subject ||
                 `Task ${taskIndex !== undefined ? taskIndex + 1 : ""}`;
+              // Get the iteration for this subtask
+              const subtaskIteration = eventData.metadata?.rebranch_iteration || 0;
 
               if (eventData.content && taskIndex !== undefined) {
+                // First check if we already have a task placeholder for this task
+                const existingPlaceholder = currentReasoningMessages.find(msg => 
+                  msg.metadata?.is_task === true && 
+                  msg.metadata.rebranch_iteration === subtaskIteration && 
+                  msg.chat_id === taskIndex
+                );
+                
+                // If no placeholder exists, create one to ensure proper task tracking
+                if (!existingPlaceholder) {
+                  // Create a task placeholder first
+                  const taskPlaceholder: Message = {
+                    role: "assistant",
+                    content: "",  // Empty content, just for tracking
+                    is_reasoning: true,
+                    chat_id: taskIndex,
+                    subject,
+                    metadata: {
+                      rebranch_iteration: subtaskIteration,
+                      is_task: true  // Flag to indicate this is a task placeholder
+                    }
+                  };
+                  
+                  // Add the placeholder to reasoning messages
+                  setCurrentReasoningMessages(prev => [...prev, taskPlaceholder]);
+                }
+                
                 // Create a reasoning message for this subtask result
+                // Include iteration number in the subject for clarity
+                const iterationText = subtaskIteration > 0 ? ` (Round ${subtaskIteration + 1})` : "";
                 const subtaskReasoningMessage: Message = {
                   role: "assistant",
                   content: eventData.content,
                   is_reasoning: true,
                   reasoning_step: endThinkingStep,
-                  subject: subject,
+                  subject: `${subject}${iterationText}`,
                   chat_id: taskIndex,
+                  // Store the iteration information
+                  metadata: {
+                    rebranch_iteration: subtaskIteration
+                  }
                 };
 
                 // Add only to current reasoning messages
@@ -317,17 +384,23 @@ export default function ChatPage() {
               } else if (chatIndex !== undefined) {
                 // This is a content chunk for a specific subtask
                 // We DON'T stream subtask content, just store the full response when complete
+                const subtaskIteration = eventData.metadata?.rebranch_iteration || 0;
+                
+                // Create a unique identifier for this task based on both index and iteration
+                // This ensures we don't mix tasks from different iterations
+                const taskKey = `${subtaskIteration}-${chatIndex}`;
+                
                 console.log(
-                  `Content for subtask ${chatIndex} received - storing for task output`,
+                  `Content for subtask ${chatIndex} (iteration ${subtaskIteration}) received - storing as ${taskKey}`,
                   eventData.content.substring(0, 20) + "...",
                 );
 
                 // Store or append to task output
                 setTaskOutputs(prev => {
-                  const currentOutput = prev[chatIndex] || "";
+                  const currentOutput = prev[taskKey] || "";
                   return {
                     ...prev,
-                    [chatIndex]: currentOutput + eventData.content
+                    [taskKey]: currentOutput + eventData.content
                   };
                 });
               }
@@ -455,6 +528,92 @@ export default function ChatPage() {
             }
             break;
 
+          case "rebranch_start":
+            console.log("Rebranching started:", eventData);
+            
+            // Get the iteration and promising paths
+            const rebranch_iteration = eventData.metadata?.rebranch_iteration || 0;
+            const promising_paths = eventData.metadata?.promising_paths || [];
+            
+            // Create a message for rebranching with a special flag marking this as a section header
+            const rebranch_message: Message = {
+              role: "assistant",
+              content: eventData.content || "Exploring promising paths further...",
+              is_reasoning: true,
+              reasoning_step: 3 + rebranch_iteration,
+              subject: `Round ${rebranch_iteration + 1} Analysis`,
+              metadata: {
+                rebranch_iteration: rebranch_iteration,
+                is_section_header: true  // Special flag to indicate this is a section header
+              }
+            };
+            
+            // Add the rebranch message to reasoning messages
+            setCurrentReasoningMessages(prev => [...prev, rebranch_message]);
+            
+            // If there are promising paths, display them
+            if (promising_paths.length > 0) {
+              const paths_list = promising_paths.map((path, idx) => `${idx + 1}. ${path}`).join("\n");
+              const paths_message: Message = {
+                role: "assistant",
+                content: `Promising paths to explore:\n${paths_list}`,
+                is_reasoning: true,
+                reasoning_step: 3 + rebranch_iteration,
+                subject: "Promising Paths"
+              };
+              
+              // Add the paths message to reasoning messages
+              setCurrentReasoningMessages(prev => [...prev, paths_message]);
+            }
+            break;
+            
+          case "rebranch_end":
+            console.log("Rebranching completed:", eventData);
+            
+            // Get the iteration and new tasks
+            const rebranch_end_iteration = eventData.metadata?.rebranch_iteration || 0;
+            const new_tasks = eventData.metadata?.new_tasks || [];
+            
+            // Create a message showing the new direction with a special flag marking this as a subtasks header
+            const rebranch_end_message: Message = {
+              role: "assistant",
+              content: eventData.content || "Continuing with new exploration paths...",
+              is_reasoning: true,
+              reasoning_step: 3 + rebranch_end_iteration,
+              subject: `Round ${rebranch_end_iteration + 1} Subtasks`,
+              metadata: {
+                rebranch_iteration: rebranch_end_iteration,
+                is_subtasks_header: true  // Special flag to indicate this is a new subtasks header
+              }
+            };
+            
+            // Add the rebranch end message to reasoning messages
+            setCurrentReasoningMessages(prev => [...prev, rebranch_end_message]);
+            
+            // If there are new tasks, store them with their iteration info in the reasoningMessages
+            // but DON'T update taskSubjects (we'll derive tasks from reasoningMessages)
+            if (new_tasks.length > 0) {
+              // For each new task, create a placeholder message that will help us track it
+              const newTaskMessages = new_tasks.map((subject, idx) => ({
+                role: "assistant" as const,
+                content: "",  // Empty content, we don't need to show this
+                is_reasoning: true,
+                chat_id: idx,  // Use the index as chat_id
+                subject: subject,
+                metadata: {
+                  rebranch_iteration: rebranch_end_iteration,
+                  is_task: true  // Flag to indicate this is a task placeholder
+                }
+              }));
+              
+              // Add these task placeholders to the reasoning messages
+              setCurrentReasoningMessages(prev => [...prev, ...newTaskMessages]);
+              
+              // Log for debugging
+              console.log(`Added ${newTaskMessages.length} new task placeholders for iteration ${rebranch_end_iteration}`);
+            }
+            break;
+            
           default:
             console.warn("Unknown event type:", eventData);
         }
@@ -546,7 +705,7 @@ export default function ChatPage() {
           {
             messages: messageBody,
             model: model,
-            stream: true,
+            stream: false,
           },
           null,
           2,
@@ -562,7 +721,7 @@ export default function ChatPage() {
         body: JSON.stringify({
           messages: messageBody,
           model: model,
-          stream: true,
+          stream: false,
         }),
       });
 
@@ -570,74 +729,329 @@ export default function ChatPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Get the response as a readable stream
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Response body is not readable");
-      }
-
-      // Process the stream
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      // Set up a reading function that processes chunks as they arrive
-      const readStream = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) {
-              console.log("Stream complete");
-              setLoading(false);
-              break;
-            }
-
-            // Decode the chunk and add to buffer
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-
-            // Process complete SSE messages from the buffer
-            const lines = buffer.split("\n\n");
-            buffer = lines.pop() || ""; // Keep the last incomplete chunk in the buffer
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  // Extract the JSON data from the SSE format
-                  const jsonStr = line.substring(6); // Remove 'data: ' prefix
-                  if (jsonStr === "[DONE]") {
-                    console.log("Stream marked as done");
-                    continue;
-                  }
-
-                  const eventData = JSON.parse(jsonStr);
-                  processSSEEvent(eventData);
-                } catch (e) {
-                  console.error("Error parsing SSE data:", e, line);
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Error reading stream:", error);
-          setLoading(false);
-
-          // Show error message
-          const errorMessage: Message = {
-            role: "assistant",
-            content: "Sorry, there was an error processing the stream.",
-          };
-          setMessages((prev) => [...prev, errorMessage]);
+      // For non-streaming response, parse the JSON directly
+      const responseData = await response.json();
+      console.log("Non-streaming response FULL:", JSON.stringify(responseData, null, 2));
+      
+      // Extra debug for the raw response shape
+      console.log("Response structure:", {
+        type: responseData.type,
+        role: responseData.role,
+        content: Array.isArray(responseData.content) ? 
+          `Array with ${responseData.content.length} items` : 
+          typeof responseData.content
+      });
+      
+      // Log specific parts of the response for easier debugging
+      if (responseData.content) {
+        // Ensure content is an array
+        const contentArray = Array.isArray(responseData.content) ? 
+          responseData.content : 
+          [{ type: "text", text: typeof responseData.content === 'string' ? responseData.content : JSON.stringify(responseData.content) }];
+        
+        console.log("Response content types:", contentArray.map(item => item?.type));
+        
+        // Replace responseData.content with the array if needed
+        if (!Array.isArray(responseData.content)) {
+          console.warn("Converting non-array content to array format");
+          responseData.content = contentArray;
         }
-      };
-
-      // Start reading the stream
-      readStream();
+        
+        // Log thinking and branches sections if they exist
+        const thinkingItem = responseData.content.find(item => item?.type === "thinking");
+        if (thinkingItem) {
+          console.log("Thinking item:", thinkingItem);
+        }
+        
+        const branchesItem = responseData.content.find(item => item?.type === "branches");
+        if (branchesItem) {
+          console.log("Branches count:", branchesItem.branches?.length || 0);
+        }
+      }
+      
+      try {
+        // Extract all thinking and branches items from the content array
+        const thinkingItems = responseData.content.filter(item => item?.type === "thinking");
+        const branchesItems = responseData.content.filter(item => item?.type === "branches");
+        
+        // IMPORTANT: Create an initial thinking message if we don't have any to ensure the dropdown appears
+        if (thinkingItems.length === 0) {
+          console.log("No thinking items found in response - creating a default one");
+          const defaultThinking = {
+            type: "thinking",
+            thinking: "Analysis complete.",
+            signature: "default"
+          };
+          thinkingItems.push(defaultThinking);
+        }
+        
+        // Find the text content (final response)
+        const textContent = responseData.content.find(item => item?.type === "text");
+        const finalResponseContent = textContent?.text || "No response text found";
+        
+        // Log if we couldn't find the text content
+        if (!textContent) {
+          console.warn("No 'text' type item found in content array. Raw content:", responseData.content);
+        }
+        
+        console.log("Processing response with:", {
+          thinkingItems: thinkingItems.length + " items",
+          branchesItems: branchesItems.length + " items",
+          finalText: finalResponseContent.substring(0, 50) + "..."
+        });
+        
+        // Get the initial thinking content (first thinking item)
+        const initialThinking = thinkingItems.length > 0 ? thinkingItems[0].thinking : "";
+        
+        // Collect all branches across all branch items
+        const allBranches = [];
+        branchesItems.forEach(branchItem => {
+          if (branchItem.branches && Array.isArray(branchItem.branches)) {
+            allBranches.push(...branchItem.branches);
+          }
+        });
+        
+        console.log(`Found ${allBranches.length} total branches across ${branchesItems.length} branch items`);
+        
+        // Create a new assistant message with the final response
+        const finalResponseMessage: Message = {
+          role: "assistant",
+          content: finalResponseContent,
+          is_final_response: true,
+        };
+        
+        // Create reasoning messages from all thinking items
+        if (thinkingItems.length > 0 || branchesItems.length > 0) {
+          // Check if we already have an initial reasoning message
+          const existingReasoningMessages = [...currentReasoningMessages];
+          console.log("Existing reasoning messages:", existingReasoningMessages);
+          
+          const reasoningMessages: Message[] = [];
+          
+          // Ensure we have at least one thinking message
+          if (thinkingItems.length > 0) {
+            // Create a reasoning message for each thinking item
+            thinkingItems.forEach((thinkingItem, index) => {
+              const reasoningMessage: Message = {
+                role: "assistant",
+                content: thinkingItem.thinking,
+                is_reasoning: true,
+                reasoning_step: index + 1,
+                subject: index === 0 ? "Query Analysis" : `Evaluation (Step ${index + 1})`,
+                metadata: {
+                  rebranch_iteration: index
+                }
+              };
+              
+              reasoningMessages.push(reasoningMessage);
+            });
+          } else {
+            // If no thinking items but we have branches, add a default thinking message
+            const defaultThinking: Message = {
+              role: "assistant",
+              content: "Analyzing your query with multiple approaches...",
+              is_reasoning: true,
+              reasoning_step: 1,
+              subject: "Query Analysis",
+              metadata: {
+                rebranch_iteration: 0
+              }
+            };
+            reasoningMessages.push(defaultThinking);
+          }
+          
+          // Create section header messages for each branch set
+          branchesItems.forEach((branchItem, index) => {
+            const headerMessage: Message = {
+              role: "assistant",
+              content: `Analyzing with parallel subtasks (Iteration ${index + 1})`,
+              is_reasoning: true,
+              reasoning_step: index + 1,
+              subject: `Iteration ${index + 1} Subtasks`,
+              metadata: {
+                rebranch_iteration: index,
+                is_subtasks_header: true
+              }
+            };
+            
+            // Insert header message at appropriate position
+            reasoningMessages.push(headerMessage);
+            
+            // Add specific task section headers
+            const branches = branchItem.branches || [];
+            if (branches.length > 0) {
+              console.log(`Adding section header for ${branches.length} branches in iteration ${index}`);
+            }
+          });
+          
+          // We'll populate this array as we go through each branch set
+          const allTaskPlaceholders: Message[] = [];
+          const allOutputs: Record<string, string> = {};
+          
+          // Process each branch item separately, preserving iteration information
+          branchesItems.forEach((branchItem, iterationIndex) => {
+            const branches = branchItem.branches || [];
+            if (branches.length === 0) return;
+            
+            console.log(`Processing ${branches.length} branches for iteration ${iterationIndex}`);
+            
+            // Process branches from this iteration
+            branches.forEach((branch, idx) => {
+              // Use the branch index if provided, otherwise use array index
+              const taskIndex = branch.index !== undefined ? branch.index : idx;
+              
+              // Create a unique key for this task output that includes the iteration
+              const taskKey = `${iterationIndex}-${taskIndex}`;
+              
+              // Store the task content
+              allOutputs[taskKey] = branch.content || `Task ${taskIndex + 1} content`;
+              
+              // Create a task placeholder message for improved tracking
+              const placeholder: Message = {
+                role: "assistant",
+                content: "",
+                is_reasoning: true,
+                chat_id: taskIndex,
+                subject: branch.subject || `Task ${taskIndex + 1}`,
+                metadata: {
+                  rebranch_iteration: iterationIndex,
+                  is_task: true
+                }
+              };
+              
+              allTaskPlaceholders.push(placeholder);
+            });
+          });
+          
+          // Log the task placeholders we've created
+          console.log(`Created ${allTaskPlaceholders.length} task placeholders across all iterations`);
+          
+          // Add all task placeholders to reasoning messages
+          const finalReasoningMessages = [...reasoningMessages, ...allTaskPlaceholders];
+          
+          // IMPORTANT: Don't completely replace reasoning messages - keep at least one for the dropdown
+          // If there are no messages, make sure we have at least one
+          if (finalReasoningMessages.length === 0) {
+            // Add a default thinking message if we don't have any
+            const defaultThinking: Message = {
+              role: "assistant",
+              content: "Analysis complete.",
+              is_reasoning: true,
+              reasoning_step: 1,
+              subject: "Query Analysis"
+            };
+            
+            finalReasoningMessages.push(defaultThinking);
+          }
+          
+          console.log(`Setting ${finalReasoningMessages.length} reasoning messages`);
+          
+          // Update the current reasoning messages - don't completely replace since we need the dropdown
+          setCurrentReasoningMessages(prevMessages => {
+            // If we have no previous messages, use our new ones
+            if (!prevMessages || prevMessages.length === 0) {
+              return finalReasoningMessages;
+            }
+            
+            // If we have final messages, completely replace
+            if (finalReasoningMessages.length > 0) {
+              return finalReasoningMessages;
+            }
+            
+            // Otherwise keep the previous messages to preserve the dropdown
+            return prevMessages;
+          });
+          
+          // Extract task subjects for display
+          const allSubjects = allTaskPlaceholders.map(placeholder => placeholder.subject || "");
+          
+          if (allSubjects.length > 0) {
+            console.log("Setting task subjects:", allSubjects);
+            setTaskSubjects(allSubjects);
+          }
+          
+          // Set task outputs for all branches
+          if (Object.keys(allOutputs).length > 0) {
+            console.log("Setting task outputs with keys:", Object.keys(allOutputs));
+            setTaskOutputs(allOutputs);
+          }
+        }
+        
+        // Add the final response message to the messages state
+        setMessages((prev) => {
+          // Remove any previous final responses
+          const filteredMessages = prev.filter(
+            (msg) => !msg.is_final_response,
+          );
+          return [...filteredMessages, finalResponseMessage];
+        });
+        
+        // Make sure we always have a thinking message to show the dropdown
+        const displayThinking = initialThinking || "Analysis complete.";
+        
+        // Set streaming messages to include the final response and the first thinking item
+        // This will make it show up in the UI
+        setStreamingMessages({
+          thinking: displayThinking,
+          final_response: finalResponseContent
+        });
+        
+        // Debug reasoning messages
+        console.log("Current reasoning messages:", currentReasoningMessages);
+        
+        // CRITICAL: Make sure we always have at least one reasoning message to ensure the dropdown appears
+        if (currentReasoningMessages.length === 0) {
+          const defaultReasoningMessage: Message = {
+            role: "assistant",
+            content: "Analysis complete.",
+            is_reasoning: true,
+            reasoning_step: 1,
+            subject: "Query Analysis"
+          };
+          setCurrentReasoningMessages([defaultReasoningMessage]);
+          console.log("Added default reasoning message because the array was empty");
+        }
+        
+        // Auto expand reasoning to show the thinking and tasks
+        setReasoningExpanded(true);
+        
+        // No need for additional debug info here as we have comprehensive logging above
+        
+        // Wait a moment to ensure the UI shows the response properly
+        setTimeout(() => {
+          // Keep loading false but preserve the thinking message
+          setLoading(false);
+          
+          // Very important: Keep a minimal streaming state to ensure the dropdown remains visible
+          const prevStreaming = { ...streamingMessages };
+          if (!prevStreaming.thinking) {
+            prevStreaming.thinking = "Analysis complete.";
+          }
+          
+          // Keep essential parts of the streaming message
+          setStreamingMessages({
+            thinking: prevStreaming.thinking,
+            final_response: finalResponseContent
+          });
+          
+          console.log("Timeout complete, preserved streaming messages for dropdown visibility");
+        }, 500);
+      } catch (error) {
+        console.error("Error processing non-streaming response:", error);
+        setLoading(false);
+        
+        // Show error message
+        const errorMessage: Message = {
+          role: "assistant",
+          content: "Sorry, there was an error processing the response.",
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
 
       // Indicate connection is active
       setConnected(true);
 
-      // Stream reading is handled by the readStream function above
+      // Response processing is complete for non-streaming mode
     } catch (error) {
       console.error("Error setting up SSE connection:", error);
 
