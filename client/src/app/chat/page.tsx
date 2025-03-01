@@ -19,13 +19,18 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      // Use no-cors mode as a fallback for CORS issues
+      // Get the updated messages array that includes the new user message
+      const updatedMessages = [...messages, newUserMessage];
+      
+      // Send the entire conversation history to the backend
       const response = await fetch('http://localhost:4000/chat_completion', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ 
+          messages: updatedMessages
+        }),
         mode: 'cors',
         credentials: 'omit',
       });
@@ -42,27 +47,25 @@ export default function ChatPage() {
         
         setMessages(prev => [...prev, newAssistantMessage]);
       } else {
-        // If response is not ok, show the fixed response
-        // Since we know the API always returns the same message, we can hardcode it as a fallback
+        // If response is not ok, show an error message
         const newAssistantMessage: Message = { 
           role: 'assistant', 
-          content: "Hi, I'm your helpful assistant" 
+          content: "Sorry, I'm having trouble connecting to the assistant service." 
         };
         
         setMessages(prev => [...prev, newAssistantMessage]);
-        console.warn('Using hardcoded response due to API issues');
+        console.warn('API returned error status:', response.status);
       }
     } catch (error) {
       console.error('Error sending message:', error);
       
-      // Fallback to hardcoded response when API is unavailable
+      // Fallback to error response when API is unavailable
       const newAssistantMessage: Message = { 
         role: 'assistant', 
-        content: "Hi, I'm your helpful assistant" 
+        content: "Sorry, I'm having trouble reaching the assistant service. Please try again later." 
       };
       
       setMessages(prev => [...prev, newAssistantMessage]);
-      console.warn('Using hardcoded response due to API error');
     } finally {
       setLoading(false);
     }
