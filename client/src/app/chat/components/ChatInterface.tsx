@@ -304,9 +304,11 @@ export default function ChatInterface({
                                   style={{ animationDelay: `${idx * 100}ms` }}
                                   onClick={() => toggleExpandTask(idx)}
                                 >
-                                  <div className="flex-1 mr-1 truncate">{subject}</div>
-                                  {/* Small dot to indicate running task - only show when loading */}
-                                  {loading && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  <div className="flex-1 mr-1 truncate">
+                                    {subject}
+                                    {/* Small dot to indicate running task - only show when loading */}
+                                    {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  </div>
                                   {/* Expand icon */}
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
                                     <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -415,9 +417,11 @@ export default function ChatInterface({
                                   className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
                                   onClick={() => toggleExpandTask(idx)}
                                 >
-                                  <div className="flex-1 mr-1 truncate">{subject}</div>
-                                  {/* Small dot to indicate running task - only show when loading or decomposing */}
-                                  {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  <div className="flex-1 mr-1 truncate">
+                                    {subject}
+                                    {/* Small dot to indicate running task - only show when loading or decomposing */}
+                                    {(loading || decomposing) && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                  </div>
                                   {/* Expand icon */}
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
                                     <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -520,9 +524,11 @@ export default function ChatInterface({
                                     className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
                                     onClick={() => toggleExpandTask(idx)}
                                   >
-                                    <div className="flex-1 mr-1 truncate">{subject}</div>
-                                    {/* Small dot to indicate running task - only show when loading */}
-                                    {loading && <span className="inline-block w-1.5 h-1.5 mr-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                    <div className="flex-1 mr-1 truncate">
+                                      {subject}
+                                      {/* Small dot to indicate running task - only show when loading */}
+                                      {loading && <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>}
+                                    </div>
                                     {/* Expand icon */}
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-accent-500">
                                       <path d="M15 3H21V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
