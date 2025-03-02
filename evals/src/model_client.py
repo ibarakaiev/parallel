@@ -9,15 +9,13 @@ class ModelClient:
         self.anthropic_api_key = anthropic_api_key
         self.client = httpx.AsyncClient(timeout=30.0)
 
-    async def query_fastapi_model(self, question: str) -> ModelResponse:
+    async def query_branchial_model(self, question: str) -> ModelResponse:
         start_time = time.time()
         
         try:
             response = await self.client.post(
                 self.fastapi_endpoint,
-                json={
-                    'message': question
-                }
+                json={"message": question}
             )
             data = response.json()
             
