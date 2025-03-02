@@ -1,0 +1,15 @@
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated files
+*.csv
+*.png
+
+# Temp files
+temp_backup/
+
+# Test files
+test_*.py
+

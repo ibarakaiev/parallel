@@ -1,47 +1,41 @@
 import asyncio
 import os
+from datetime import datetime
 from dotenv import load_dotenv
-from evals.src.model_client import ModelClient
-from evals.src.evaluator import ResponseEvaluator
-from evals.src.runner import EvalRunner
-import json
+from anthropic import AsyncAnthropic
+from .src.model_client import ModelClient
+from .src.evaluator import ResponseEvaluator
+from .src.runner import EvalRunner
+from .src.question_generator import QuestionGenerator
+
+load_dotenv()
 
 async def main():
-    load_dotenv()
+    # Initialize components
+    anthropic_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    question_generator = QuestionGenerator(anthropic_client)
     
-    # Initialize clients
+    # Generate business questions
+    print("Generating business questions...")
+    questions = await question_generator.generate_business_questions(num_questions=10)
+    
+    # Initialize evaluation components
     model_client = ModelClient(
-        fastapi_endpoint='http://localhost:8000/chat',  # Your FastAPI endpoint
-        anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
+        fastapi_url=os.getenv("FASTAPI_ENDPOINT", "http://localhost:4000"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY")
     )
-    
-    evaluator = ResponseEvaluator(model_client)
+    evaluator = ResponseEvaluator()
     runner = EvalRunner(model_client, evaluator)
     
     # Run evaluation
-    results = await runner.run_evaluation()
+    print("Running evaluation...")
+    session = await runner.run_evaluation(questions)  # Modified to accept questions parameter
     
-    # Print or save results
-    print("\nEvaluation Results:")
-    print(f"Total Questions: {results.summary.total_questions}")
-    print(f"\nOverall Winner: {results.summary.overall_winner}")
-    print(f"\nScoring Summary:")
-    print(f"Model A (FastAPI) Total Score: {results.summary.model_a_total_score:.2f}")
-    print(f"Model B (Haiku) Total Score: {results.summary.model_b_total_score:.2f}")
-    
-    print(f"\nDetailed Metrics:")
-    print(f"Comprehensiveness - Model A: {results.summary.model_a_avg_comprehensiveness:.2f}/35, Model B: {results.summary.model_b_avg_comprehensiveness:.2f}/35")
-    print(f"Practical - Model A: {results.summary.model_a_avg_practical:.2f}/35, Model B: {results.summary.model_b_avg_practical:.2f}/35")
-    print(f"Clarity - Model A: {results.summary.model_a_avg_clarity:.2f}/20, Model B: {results.summary.model_b_avg_clarity:.2f}/20")
-    print(f"Structure - Model A: {results.summary.model_a_avg_structure:.2f}/10, Model B: {results.summary.model_b_avg_structure:.2f}/10")
-    
-    print(f"\nPerformance Metrics:")
-    print(f"Average Latency - Model A: {results.summary.average_latency_a:.2f}ms, Model B: {results.summary.average_latency_b:.2f}ms")
-    print(f"Faster Responses - Model A: {results.summary.model_a_faster_count}, Model B: {results.summary.model_b_faster_count}")
-
-    # Save results to file
-    with open(f'eval_results_{results.id}.json', 'w') as f:
-        json.dump(results.dict(), f, indent=2, default=str)
+    # Print summary and save to CSV
+    runner.print_summary(session)
+    csv_file = runner.save_results_to_csv(session)
+    print(f"\nResults saved to {csv_file}")
+    runner.visualize_comparison(session)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
