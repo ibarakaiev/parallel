@@ -774,6 +774,9 @@ export default function ChatPage() {
         const thinkingItems = responseData.content.filter(item => item?.type === "thinking");
         const branchesItems = responseData.content.filter(item => item?.type === "branches");
         
+        // Log the exact structure of the thinking items for debugging
+        console.log("Thinking items structure:", JSON.stringify(thinkingItems, null, 2));
+        
         // IMPORTANT: Create an initial thinking message if we don't have any to ensure the dropdown appears
         if (thinkingItems.length === 0) {
           console.log("No thinking items found in response - creating a default one");
@@ -814,10 +817,19 @@ export default function ChatPage() {
         console.log(`Found ${allBranches.length} total branches across ${branchesItems.length} branch items`);
         
         // Create a new assistant message with the final response
+        // Get the first thinking item content for debugging
+        const firstThinking = thinkingItems.length > 0 ? thinkingItems[0].thinking : "";
+        
+        // Create the final response message with is_final_response flag to ensure the dropdown appears
         const finalResponseMessage: Message = {
           role: "assistant",
           content: finalResponseContent,
-          is_final_response: true,
+          is_final_response: true,  // This flag is crucial for showing the reasoning dropdown
+          metadata: {
+            has_reasoning: true,    // Additional flag to ensure reasoning is displayed
+            reasoning_count: currentReasoningMessages.length,
+            thinking_debug: firstThinking  // Pass the raw thinking content for debugging
+          }
         };
         
         // Create reasoning messages from all thinking items
@@ -839,11 +851,17 @@ export default function ChatPage() {
                 reasoning_step: index + 1,
                 subject: index === 0 ? "Query Analysis" : `Evaluation (Step ${index + 1})`,
                 metadata: {
-                  rebranch_iteration: index
+                  rebranch_iteration: index,
+                  thinking_content: thinkingItem.thinking  // Include the thinking content in metadata
                 }
               };
               
               reasoningMessages.push(reasoningMessage);
+              
+              // Log the reasoning message structure for debugging
+              console.log(`Created reasoning message ${index}:`, 
+                `content: ${reasoningMessage.content?.substring(0, 30)}...`,
+                `metadata.thinking_content: ${reasoningMessage.metadata?.thinking_content?.substring(0, 30)}...`);
             });
           } else {
             // If no thinking items but we have branches, add a default thinking message
@@ -854,7 +872,8 @@ export default function ChatPage() {
               reasoning_step: 1,
               subject: "Query Analysis",
               metadata: {
-                rebranch_iteration: 0
+                rebranch_iteration: 0,
+                thinking_content: "Analyzing your query with multiple approaches..."  // Include the thinking content in metadata
               }
             };
             reasoningMessages.push(defaultThinking);
@@ -979,15 +998,29 @@ export default function ChatPage() {
         
         // Add the final response message to the messages state
         setMessages((prev) => {
-          // Remove any previous final responses
-          const filteredMessages = prev.filter(
-            (msg) => !msg.is_final_response,
-          );
-          return [...filteredMessages, finalResponseMessage];
+          // IMPORTANT: Replace any previous assistant message for this user message to avoid duplication
+          // Remove any previous response to the last user message
+          let lastUserIndex = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === "user") {
+              lastUserIndex = i;
+              break;
+            }
+          }
+          
+          // Keep all messages up to and including the last user message, then add our new response
+          const nonDuplicateMessages = lastUserIndex >= 0 ? 
+            prev.slice(0, lastUserIndex + 1) : 
+            prev.filter(msg => msg.role === "user");
+            
+          console.log("Keeping messages up to index", lastUserIndex, "total:", nonDuplicateMessages.length);
+          
+          // Add our final response with the reasoning attached to it
+          return [...nonDuplicateMessages, finalResponseMessage];
         });
         
-        // Make sure we always have a thinking message to show the dropdown
-        const displayThinking = initialThinking || "Analysis complete.";
+        // Set the thinking content for the dropdown
+        const displayThinking = initialThinking || "";
         
         // Set streaming messages to include the final response and the first thinking item
         // This will make it show up in the UI
@@ -1003,10 +1036,10 @@ export default function ChatPage() {
         if (currentReasoningMessages.length === 0) {
           const defaultReasoningMessage: Message = {
             role: "assistant",
-            content: "Analysis complete.",
+            content: "",  // Empty content to avoid showing "Analysis complete"
             is_reasoning: true,
             reasoning_step: 1,
-            subject: "Query Analysis"
+            subject: ""   // No subject needed
           };
           setCurrentReasoningMessages([defaultReasoningMessage]);
           console.log("Added default reasoning message because the array was empty");

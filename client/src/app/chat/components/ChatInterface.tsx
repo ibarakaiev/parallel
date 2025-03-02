@@ -118,48 +118,54 @@ export default function ChatInterface({
     // Include iteration info in the expanded task key
     const expandedKey = iteration !== undefined ? `${iteration}-${idx}` : idx;
     setExpandedTask(expandedTask === expandedKey ? null : expandedKey);
-    
+
     // If iteration is provided, find that specific task output
     if (iteration !== undefined) {
       const outputKey = `${iteration}-${idx}`;
       if (taskOutputs[outputKey]) {
         // Use real task output from the server
-        setLocalTaskOutputs((prev) => ({ ...prev, [expandedKey]: taskOutputs[outputKey] }));
+        setLocalTaskOutputs((prev) => ({
+          ...prev,
+          [expandedKey]: taskOutputs[outputKey],
+        }));
         return;
       }
     } else {
       // If no iteration provided, find all task outputs that match this index across iterations
-      const outputKeys = Object.keys(taskOutputs).filter(key => {
+      const outputKeys = Object.keys(taskOutputs).filter((key) => {
         // Task output keys are stored as "iteration-index"
-        const parts = key.split('-');
+        const parts = key.split("-");
         if (parts.length === 2) {
           const taskIndex = parseInt(parts[1]);
           return taskIndex === idx;
         }
         return false;
       });
-      
+
       // Find the most recent iteration for this task
       // Sort by iteration number (first part of the key) in descending order
       outputKeys.sort((a, b) => {
-        const iterationA = parseInt(a.split('-')[0]);
-        const iterationB = parseInt(b.split('-')[0]);
+        const iterationA = parseInt(a.split("-")[0]);
+        const iterationB = parseInt(b.split("-")[0]);
         return iterationB - iterationA;
       });
-      
+
       // If we have at least one output for this task, use it
       if (outputKeys.length > 0) {
         const latestOutputKey = outputKeys[0];
         const latestOutput = taskOutputs[latestOutputKey];
-        
+
         if (latestOutput) {
           // Use real task output from the server if available
-          setLocalTaskOutputs((prev) => ({ ...prev, [expandedKey]: latestOutput }));
+          setLocalTaskOutputs((prev) => ({
+            ...prev,
+            [expandedKey]: latestOutput,
+          }));
           return;
         }
       }
     }
-    
+
     // If we don't have output for this task yet in our local state or from the server
     if (!localTaskOutputs[idx]) {
       // Simulate streaming output for the task as a fallback
@@ -253,47 +259,54 @@ export default function ChatInterface({
   return (
     <div className="flex flex-col flex-1 overflow-hidden bg-accent-50 dark:bg-accent-50">
       {/* Task output panel */}
-      {expandedTask !== null && (
+      {expandedTask !== null &&
         (() => {
           // Parse expanded task key to get iteration and index
           let taskIndex: number;
           let iteration: number | undefined;
-          
-          if (typeof expandedTask === 'string' && expandedTask.includes('-')) {
-            const parts = expandedTask.toString().split('-');
+
+          if (typeof expandedTask === "string" && expandedTask.includes("-")) {
+            const parts = expandedTask.toString().split("-");
             iteration = parseInt(parts[0]);
             taskIndex = parseInt(parts[1]);
           } else {
             taskIndex = Number(expandedTask);
           }
-          
+
           // Get subject from tasksByIteration if available
-          let subject = '';
+          let subject = "";
           if (iteration !== undefined) {
             // Find task placeholders with this iteration and index
-            const taskPlaceholder = reasoningMessages.find(msg => 
-              msg.metadata?.is_task === true && 
-              msg.metadata.rebranch_iteration === iteration && 
-              msg.chat_id === taskIndex
+            const taskPlaceholder = reasoningMessages.find(
+              (msg) =>
+                msg.metadata?.is_task === true &&
+                msg.metadata.rebranch_iteration === iteration &&
+                msg.chat_id === taskIndex,
             );
             if (taskPlaceholder) {
               subject = taskPlaceholder.subject || `Task ${taskIndex + 1}`;
             }
           }
-          
+
           // Fallback to taskSubjects if no subject found
           if (!subject && taskSubjects[taskIndex]) {
             subject = taskSubjects[taskIndex];
           }
-          
+
           if (!subject) {
             return null; // Don't render if no subject found
           }
-          
+
           // Get appropriate output
-          const outputKey = iteration !== undefined ? `${iteration}-${taskIndex}` : taskIndex.toString();
-          const output = localTaskOutputs[expandedTask] || taskOutputs[outputKey] || "Loading...";
-          
+          const outputKey =
+            iteration !== undefined
+              ? `${iteration}-${taskIndex}`
+              : taskIndex.toString();
+          const output =
+            localTaskOutputs[expandedTask] ||
+            taskOutputs[outputKey] ||
+            "Loading...";
+
           return (
             <TaskOutputPanel
               subject={subject}
@@ -302,14 +315,13 @@ export default function ChatInterface({
               iteration={iteration}
             />
           );
-        })()
-      )}
+        })()}
 
       {/* Messages container */}
       <div className="flex-1 overflow-y-auto py-6 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto space-y-4">
           {/* Welcome message - only shown when no messages exist */}
-          {getMessagesByChat().length === 0 && !loading && !decomposing && (
+          {messages.length === 0 && !loading && !decomposing && (
             <div className="flex flex-col items-center justify-center h-96 mt-16">
               <h1 className="text-3xl font-serif mb-2">
                 Welcome to <em>Parallel</em>
@@ -321,7 +333,7 @@ export default function ChatInterface({
             </div>
           )}
 
-          {/* All conversation messages in sequence - one pair at a time */}
+          {/* All conversation messages in sequence */}
           <div className="space-y-4">
             {/* Show all messages directly */}
             {messages.map((message, index) => (
@@ -330,186 +342,38 @@ export default function ChatInterface({
                   key={`message-component-${index}`}
                   message={message}
                   reasoningMessages={
-                    message.role === "assistant" ? reasoningMessages : []
+                    message.role === "assistant" && message.is_final_response
+                      ? reasoningMessages
+                      : []
                   }
                   reasoningExpanded={reasoningExpanded}
                   toggleReasoningExpanded={toggleReasoningExpanded}
                   taskSubjects={
-                    message.role === "assistant" ? taskSubjects : []
+                    message.role === "assistant" && message.is_final_response
+                      ? taskSubjects
+                      : []
                   }
+                  toggleExpandTask={toggleExpandTask}
                 />
               </div>
             ))}
           </div>
 
-          {/* Single streaming message with thinking dropdown */}
-          {(loading ||
-            (streamingMessages && streamingMessages.thinking) ||
-            (streamingMessages && streamingMessages.final_response)) && (
+          {/* Loading indicator shown when processing a request */}
+          {loading && (
             <div className="flex justify-start">
               <div className="bg-white dark:bg-background-secondary p-4 rounded-lg shadow-sm w-full border border-accent-200 dark:border-accent-300">
-                {/* Thinking dropdown - always show */}
-                <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
-                  {/* Thinking header - clickable to expand/collapse */}
+                <div className="flex items-center gap-2 py-1">
+                  <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
                   <div
-                    className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
-                    onClick={toggleReasoningExpanded}
-                  >
-                    <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
-                      <span className="font-medium text-sm">Analysis</span>
-                    </div>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? "rotate-180" : ""}`}
-                    >
-                      <path
-                        d="M6 9L12 15L18 9"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-
-                  {/* Thinking content - collapsible */}
-                  {reasoningExpanded && (
-                    <div className="p-3 border-t border-accent-200 dark:border-accent-300 animate-fadeIn">
-                      {/* General reasoning plan - always show something */}
-                      <div className="mb-3">
-                        <div className="text-sm text-accent-800 dark:text-accent-700">
-                          {reasoningMessages.length > 0 &&
-                          reasoningMessages[0] ? (
-                            <div>{reasoningMessages[0].content}</div>
-                          ) : streamingMessages &&
-                            streamingMessages.thinking ? (
-                            <div>
-                              {streamingMessages.thinking}
-                              <div className="flex items-center gap-2 mt-2">
-                                <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
-                                <div
-                                  className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                  style={{ animationDelay: "0.2s" }}
-                                ></div>
-                                <div
-                                  className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                  style={{ animationDelay: "0.4s" }}
-                                ></div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <span>Decomposing query</span>
-                              <div className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"></div>
-                              <div
-                                className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                style={{ animationDelay: "0.2s" }}
-                              ></div>
-                              <div
-                                className="h-1.5 w-1.5 rounded-full bg-accent-500 animate-pulse"
-                                style={{ animationDelay: "0.4s" }}
-                              ></div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Grid of subtasks - only show in thinking view */}
-                      {taskSubjects && taskSubjects.length > 0 && (
-                        <div>
-                          <div className="text-sm font-medium mb-1">
-                            Subtasks
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            {taskSubjects.map((subject, idx) => (
-                              <div
-                                key={`task-subject-${idx}`}
-                                className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
-                                style={{ animationDelay: `${idx * 100}ms` }}
-                                onClick={() => toggleExpandTask(idx)}
-                              >
-                                <div className="flex-1 mr-1 truncate">
-                                  {subject}
-                                  {/* Small dot to indicate running task - only show when loading */}
-                                  {loading && (
-                                    <span className="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-accent-500 animate-pulse"></span>
-                                  )}
-                                </div>
-                                {/* Expand icon */}
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="text-accent-500"
-                                >
-                                  <path
-                                    d="M15 3H21V9"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                  <path
-                                    d="M9 21H3V15"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                  <path
-                                    d="M21 3L14 10"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                  <path
-                                    d="M3 21L10 14"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
+                    style={{ animationDelay: "0.2s" }}
+                  ></div>
+                  <div
+                    className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
+                    style={{ animationDelay: "0.4s" }}
+                  ></div>
                 </div>
-
-                {/* Show the final response streaming if available - this is the main content */}
-                {streamingMessages && streamingMessages.final_response ? (
-                  <div className="text-base leading-relaxed font-serif prose prose-headings:font-serif prose-headings:text-accent-900 prose-p:text-accent-900 prose-a:text-blue-600 prose-strong:text-accent-900 prose-ul:text-accent-900 prose-ol:text-accent-900 max-w-none">
-                    {/* Use ReactMarkdown to properly render the markdown */}
-                    <ReactMarkdown components={MarkdownComponents}>
-                      {streamingMessages.final_response}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  /* Loading indicator - only show dots, no text */
-                  loading && (
-                    <div className="flex items-center gap-2 py-1">
-                      <div className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"></div>
-                      <div
-                        className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
-                        style={{ animationDelay: "0.2s" }}
-                      ></div>
-                      <div
-                        className="h-2 w-2 rounded-full bg-accent-500 animate-pulse"
-                        style={{ animationDelay: "0.4s" }}
-                      ></div>
-                    </div>
-                  )
-                )}
               </div>
             </div>
           )}
@@ -572,132 +436,185 @@ export default function ChatInterface({
                             {(() => {
                               // Find all section headers
                               const sectionHeaders = reasoningMessages
-                                .filter(msg => msg.metadata?.is_subtasks_header)
+                                .filter(
+                                  (msg) => msg.metadata?.is_subtasks_header,
+                                )
                                 .sort((a, b) => {
                                   // Sort by iteration
-                                  const iterA = a.metadata?.rebranch_iteration || 0;
-                                  const iterB = b.metadata?.rebranch_iteration || 0;
+                                  const iterA =
+                                    a.metadata?.rebranch_iteration || 0;
+                                  const iterB =
+                                    b.metadata?.rebranch_iteration || 0;
                                   return iterA - iterB;
                                 });
-                                
+
                               // If no headers, use a default one
                               if (sectionHeaders.length === 0) {
                                 sectionHeaders.push({
                                   role: "assistant",
-                                  content: "Breaking down the query into parallel subtasks for processing.",
+                                  content:
+                                    "Breaking down the query into parallel subtasks for processing.",
                                   subject: "Initial Subtasks",
                                   is_reasoning: true,
-                                  metadata: { rebranch_iteration: 0, is_subtasks_header: true }
+                                  metadata: {
+                                    rebranch_iteration: 0,
+                                    is_subtasks_header: true,
+                                  },
                                 });
                               }
-                              
+
                               // Group tasks by iteration
-                              const tasksByIteration: Record<number, Array<{subject: string, index: number}>> = {};
-                              
+                              const tasksByIteration: Record<
+                                number,
+                                Array<{ subject: string; index: number }>
+                              > = {};
+
                               // Get all tasks from reasoning messages, appropriately grouped by iteration
-                              
+
                               // First collect all task placeholder messages (these have the most reliable iteration info)
-                              const taskPlaceholders = reasoningMessages
-                                .filter(msg => msg.chat_id !== undefined && msg.metadata?.is_task === true);
-                                
-                              console.log("Task placeholders:", taskPlaceholders.map(tp => 
-                                `${tp.subject} (iter: ${tp.metadata?.rebranch_iteration}, idx: ${tp.chat_id})`));
-                              
+                              const taskPlaceholders = reasoningMessages.filter(
+                                (msg) =>
+                                  msg.chat_id !== undefined &&
+                                  msg.metadata?.is_task === true,
+                              );
+
+                              console.log(
+                                "Task placeholders:",
+                                taskPlaceholders.map(
+                                  (tp) =>
+                                    `${tp.subject} (iter: ${tp.metadata?.rebranch_iteration}, idx: ${tp.chat_id})`,
+                                ),
+                              );
+
                               // Then add all task result messages (these contain the actual task outputs)
-                              const taskResults = reasoningMessages
-                                .filter(msg => 
-                                  msg.chat_id !== undefined && 
-                                  !msg.metadata?.is_task && 
-                                  !msg.metadata?.is_section_header && 
-                                  !msg.metadata?.is_subtasks_header
-                                );
-                              
+                              const taskResults = reasoningMessages.filter(
+                                (msg) =>
+                                  msg.chat_id !== undefined &&
+                                  !msg.metadata?.is_task &&
+                                  !msg.metadata?.is_section_header &&
+                                  !msg.metadata?.is_subtasks_header,
+                              );
+
                               // Combine all task-related messages and organize by iteration
-                              const allTaskMessages = [...taskPlaceholders, ...taskResults];
-                                
+                              const allTaskMessages = [
+                                ...taskPlaceholders,
+                                ...taskResults,
+                              ];
+
                               // Group them by iteration
-                              allTaskMessages.forEach(msg => {
-                                const iteration = msg.metadata?.rebranch_iteration || 0;
+                              allTaskMessages.forEach((msg) => {
+                                const iteration =
+                                  msg.metadata?.rebranch_iteration || 0;
                                 if (!tasksByIteration[iteration]) {
                                   tasksByIteration[iteration] = [];
                                 }
-                                
+
                                 // Only add if not already present
-                                if (!tasksByIteration[iteration].some(t => t.index === msg.chat_id)) {
+                                if (
+                                  !tasksByIteration[iteration].some(
+                                    (t) => t.index === msg.chat_id,
+                                  )
+                                ) {
                                   tasksByIteration[iteration].push({
-                                    subject: msg.subject || `Task ${msg.chat_id as number + 1}`,
-                                    index: msg.chat_id as number
+                                    subject:
+                                      msg.subject ||
+                                      `Task ${(msg.chat_id as number) + 1}`,
+                                    index: msg.chat_id as number,
                                   });
                                 }
                               });
-                              
+
                               // If no task placeholders, try to get them from task result messages
                               if (Object.keys(tasksByIteration).length === 0) {
                                 // Add tasks from task result messages as fallback
                                 reasoningMessages
-                                  .filter(msg => msg.chat_id !== undefined && !msg.metadata?.is_task)
-                                  .forEach(msg => {
-                                    const iteration = msg.metadata?.rebranch_iteration || 0;
+                                  .filter(
+                                    (msg) =>
+                                      msg.chat_id !== undefined &&
+                                      !msg.metadata?.is_task,
+                                  )
+                                  .forEach((msg) => {
+                                    const iteration =
+                                      msg.metadata?.rebranch_iteration || 0;
                                     if (!tasksByIteration[iteration]) {
                                       tasksByIteration[iteration] = [];
                                     }
-                                    
-                                    const taskSubject = msg.subject || `Task ${msg.chat_id}`;
+
+                                    const taskSubject =
+                                      msg.subject || `Task ${msg.chat_id}`;
                                     // Remove iteration text from subject if present
-                                    const cleanSubject = taskSubject.replace(/ \(Round \d+\)$/, '');
-                                    
+                                    const cleanSubject = taskSubject.replace(
+                                      / \(Round \d+\)$/,
+                                      "",
+                                    );
+
                                     // Only add if not already present
-                                    if (!tasksByIteration[iteration].some(t => t.index === msg.chat_id)) {
+                                    if (
+                                      !tasksByIteration[iteration].some(
+                                        (t) => t.index === msg.chat_id,
+                                      )
+                                    ) {
                                       tasksByIteration[iteration].push({
                                         subject: cleanSubject,
-                                        index: msg.chat_id as number
+                                        index: msg.chat_id as number,
                                       });
                                     }
                                   });
                               }
-                              
+
                               // Add initial tasks from taskSubjects as last resort
-                              if (!tasksByIteration[0] && taskSubjects.length > 0) {
-                                tasksByIteration[0] = taskSubjects.map((subject, idx) => ({
-                                  subject,
-                                  index: idx
-                                }));
+                              if (
+                                !tasksByIteration[0] &&
+                                taskSubjects.length > 0
+                              ) {
+                                tasksByIteration[0] = taskSubjects.map(
+                                  (subject, idx) => ({
+                                    subject,
+                                    index: idx,
+                                  }),
+                                );
                               }
-                              
+
                               // MODIFIED: Always show initial tasks first, then show later iterations with transition explanations
-                              
+
                               // Always render initial subtasks first
                               const result = [];
-                              
+
                               // 1. Add the initial subtasks section
-                              const initialTaskHeader = sectionHeaders.find(h => 
-                                (h.metadata?.rebranch_iteration || 0) === 0
+                              const initialTaskHeader = sectionHeaders.find(
+                                (h) =>
+                                  (h.metadata?.rebranch_iteration || 0) === 0,
                               ) || {
                                 subject: "Initial Subtasks",
-                                content: "Breaking down the query into parallel subtasks for processing.",
-                                metadata: { rebranch_iteration: 0 }
+                                content:
+                                  "Breaking down the query into parallel subtasks for processing.",
+                                metadata: { rebranch_iteration: 0 },
                               };
-                              
+
                               const initialTasks = tasksByIteration[0] || [];
-                              
+
                               // If we have no initial tasks but have taskSubjects, use those instead
-                              const displayInitialTasks = initialTasks.length > 0 ? initialTasks : 
-                                taskSubjects.map((subject, idx) => ({
-                                  subject,
-                                  index: idx
-                                }));
-                                
+                              const displayInitialTasks =
+                                initialTasks.length > 0
+                                  ? initialTasks
+                                  : taskSubjects.map((subject, idx) => ({
+                                      subject,
+                                      index: idx,
+                                    }));
+
                               // Add initial tasks section
                               result.push(
                                 <div key="section-initial" className="mb-4">
                                   {/* Section header */}
                                   <div className="text-sm font-medium mb-1">
-                                    {initialTaskHeader.subject || "Initial Subtasks"}
+                                    {initialTaskHeader.subject ||
+                                      "Initial Subtasks"}
                                   </div>
                                   <div className="text-xs mb-2 text-accent-600">
-                                    {initialTaskHeader.content || "Breaking down the query into parallel subtasks for processing."}
+                                    {initialTaskHeader.content ||
+                                      "Breaking down the query into parallel subtasks for processing."}
                                   </div>
-                                  
+
                                   {/* Initial tasks */}
                                   <div className="grid grid-cols-2 gap-2 mb-2">
                                     {displayInitialTasks.map((task, idx) => {
@@ -705,8 +622,12 @@ export default function ChatInterface({
                                         <div
                                           key={`task-initial-${idx}`}
                                           className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
-                                          style={{ animationDelay: `${idx * 100}ms` }}
-                                          onClick={() => toggleExpandTask(task.index, 0)}
+                                          style={{
+                                            animationDelay: `${idx * 100}ms`,
+                                          }}
+                                          onClick={() =>
+                                            toggleExpandTask(task.index, 0)
+                                          }
                                         >
                                           <div className="flex-1 mr-1 truncate">
                                             {task.subject}
@@ -757,53 +678,73 @@ export default function ChatInterface({
                                       );
                                     })}
                                   </div>
-                                </div>
+                                </div>,
                               );
-                              
+
                               // 2. Add sections for each iteration except the initial one
                               const iterations = sectionHeaders
-                                .filter(header => (header.metadata?.rebranch_iteration || 0) > 0)
-                                .map(header => header.metadata?.rebranch_iteration || 0)
+                                .filter(
+                                  (header) =>
+                                    (header.metadata?.rebranch_iteration || 0) >
+                                    0,
+                                )
+                                .map(
+                                  (header) =>
+                                    header.metadata?.rebranch_iteration || 0,
+                                )
                                 .sort((a, b) => a - b);
-                              
+
                               // For each iteration > 0, add a description of what changed before showing tasks
-                              iterations.forEach(iteration => {
+                              iterations.forEach((iteration) => {
                                 // Find rebranch explanation for this iteration from reasoning messages
-                                const rebranchExplanation = reasoningMessages.find(msg => 
-                                  msg.metadata?.rebranch_iteration === iteration && 
-                                  (msg.event_type === "rebranch_end" || msg.metadata?.event_type === "rebranch_end")
-                                );
-                                
+                                const rebranchExplanation =
+                                  reasoningMessages.find(
+                                    (msg) =>
+                                      msg.metadata?.rebranch_iteration ===
+                                        iteration &&
+                                      (msg.event_type === "rebranch_end" ||
+                                        msg.metadata?.event_type ===
+                                          "rebranch_end"),
+                                  );
+
                                 // Find header for this iteration
-                                const header = sectionHeaders.find(h => 
-                                  (h.metadata?.rebranch_iteration || 0) === iteration
+                                const header = sectionHeaders.find(
+                                  (h) =>
+                                    (h.metadata?.rebranch_iteration || 0) ===
+                                    iteration,
                                 );
-                                
+
                                 // Get tasks for this iteration
                                 const tasks = tasksByIteration[iteration] || [];
-                                
+
                                 // Only add if we have a header or tasks
                                 if (header || tasks.length > 0) {
                                   result.push(
-                                    <div key={`section-${iteration}`} className="mb-4">
+                                    <div
+                                      key={`section-${iteration}`}
+                                      className="mb-4"
+                                    >
                                       {/* Add transition explanation between task sets */}
                                       <div className="p-2 mb-3 bg-accent-50 border-l-4 border-accent-400 text-sm">
-                                        <p className="mb-1 font-medium">After analyzing initial results:</p>
+                                        <p className="mb-1 font-medium">
+                                          After analyzing initial results:
+                                        </p>
                                         <p className="text-xs">
-                                          {rebranchExplanation?.content || 
-                                          "Exploring alternative approaches based on the initial findings."}
+                                          {rebranchExplanation?.content ||
+                                            "Exploring alternative approaches based on the initial findings."}
                                         </p>
                                       </div>
-                                      
+
                                       {/* Section header */}
                                       <div className="text-sm font-medium mb-1">
-                                        {header?.subject || `Further Exploration (Round ${iteration})`}
+                                        {header?.subject ||
+                                          `Further Exploration (Round ${iteration})`}
                                       </div>
                                       <div className="text-xs mb-2 text-accent-600">
-                                        {header?.content || 
-                                        `Exploring additional perspectives to better answer the query.`}
+                                        {header?.content ||
+                                          `Exploring additional perspectives to better answer the query.`}
                                       </div>
-                                      
+
                                       {/* Tasks for this section */}
                                       <div className="grid grid-cols-2 gap-2 mb-2">
                                         {tasks.map((task, idx) => {
@@ -813,8 +754,15 @@ export default function ChatInterface({
                                             <div
                                               key={`task-${taskDisplayKey}`}
                                               className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
-                                              style={{ animationDelay: `${idx * 100}ms` }}
-                                              onClick={() => toggleExpandTask(task.index, iteration)}
+                                              style={{
+                                                animationDelay: `${idx * 100}ms`,
+                                              }}
+                                              onClick={() =>
+                                                toggleExpandTask(
+                                                  task.index,
+                                                  iteration,
+                                                )
+                                              }
                                             >
                                               <div className="flex-1 mr-1 truncate">
                                                 {task.subject}
@@ -865,14 +813,13 @@ export default function ChatInterface({
                                           );
                                         })}
                                       </div>
-                                    </div>
+                                    </div>,
                                   );
                                 }
                               });
-                              
+
                               return result;
                             })()}
-                            
                           </div>
                         )}
                       </div>
@@ -1119,9 +1066,8 @@ function TaskOutputPanel({
   iteration?: number;
 }) {
   // Add iteration info to the panel title if available
-  const displaySubject = iteration !== undefined ? 
-    `${subject} (Round ${iteration + 1})` : 
-    subject;
+  const displaySubject =
+    iteration !== undefined ? `${subject} (Round ${iteration + 1})` : subject;
   return (
     <div className="fixed right-0 top-0 bottom-0 w-1/3 bg-white dark:bg-background-secondary border-l border-accent-200 dark:border-accent-300 z-10 shadow-lg flex flex-col">
       <div className="p-4 border-b border-accent-200 dark:border-accent-300 flex justify-between items-center">
@@ -1169,19 +1115,44 @@ function MessageComponent({
   reasoningExpanded = false,
   toggleReasoningExpanded = () => {},
   taskSubjects = [],
+  toggleExpandTask = (idx: number) => {}, // Add this parameter
 }: {
   message: Message;
   reasoningMessages?: Message[];
   reasoningExpanded?: boolean;
   toggleReasoningExpanded?: () => void;
   taskSubjects?: string[];
+  toggleExpandTask?: (idx: number) => void; // Add this to the type
 }) {
   const isUser = message.role === "user";
-  // Don't show reasoning dropdown in final response messages anymore
-  // This prevents the duplicate dropdown issue
+  // Only show reasoning dropdown in final response messages from the assistant
+  const shouldShowReasoning =
+    !isUser &&
+    message.is_final_response === true &&
+    reasoningMessages.length > 0;
 
   // For debugging
-  console.log("Rendering message:", isUser ? "USER" : "ASSISTANT", message);
+  console.log(
+    "Rendering message:",
+    isUser ? "USER" : "ASSISTANT",
+    "showReasoning:",
+    shouldShowReasoning,
+    "reasoningCount:",
+    reasoningMessages.length,
+  );
+
+  // Debug the reasoning messages structure
+  if (reasoningMessages.length > 0) {
+    console.log(
+      "Reasoning messages structure:",
+      reasoningMessages.map((msg) => ({
+        content: msg.content?.substring(0, 20) + "...",
+        hasMetadata: !!msg.metadata,
+        hasThinkingContent: !!msg.metadata?.thinking_content,
+        isTask: !!msg.metadata?.is_task,
+      })),
+    );
+  }
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -1192,6 +1163,126 @@ function MessageComponent({
             : "bg-white dark:bg-background-secondary text-accent-900 dark:text-accent-900 border border-accent-200 dark:border-accent-300 w-full"
         }`}
       >
+        {/* Show reasoning dropdown for assistant's final response */}
+        {shouldShowReasoning && (
+          <div className="mb-3 border border-accent-200 dark:border-accent-300 rounded-lg overflow-hidden bg-accent-50 dark:bg-accent-800/10">
+            {/* Thinking header - clickable to expand/collapse */}
+            <div
+              className="flex items-center justify-between p-2 cursor-pointer hover:bg-accent-100 dark:hover:bg-accent-800/20"
+              onClick={toggleReasoningExpanded}
+            >
+              <div className="flex items-center gap-2 text-accent-700 dark:text-accent-700">
+                <span className="font-medium text-sm">Details</span>
+              </div>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className={`text-accent-500 transition-transform duration-200 ${reasoningExpanded ? "rotate-180" : ""}`}
+              >
+                <path
+                  d="M6 9L12 15L18 9"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+
+            {/* Thinking content - collapsible */}
+            {reasoningExpanded && (
+              <div className="p-3 border-t border-accent-200 dark:border-accent-300 animate-fadeIn">
+                {/* Display thinking content if available, in serif font */}
+                {message.metadata?.thinking_debug && (
+                  <div className="mb-3">
+                    <div className="text-sm font-serif">
+                      {message.metadata.thinking_debug}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fallback to display reasoning messages if available */}
+                {reasoningMessages
+                  .filter(
+                    (msg) =>
+                      // Only show messages with content that aren't task placeholders
+                      msg.content && !msg.metadata?.is_task,
+                  )
+                  .map((reasoningMsg, idx) => {
+                    // Show full message content for now
+                    return (
+                      <div key={`thinking-${idx}`} className="mb-3">
+                        <div className="text-sm text-accent-800 dark:text-accent-700">
+                          <ReactMarkdown components={MarkdownComponents}>
+                            {reasoningMsg.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                {/* Grid of tasks */}
+                {taskSubjects && taskSubjects.length > 0 && (
+                  <div>
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      {taskSubjects.map((subject, idx) => (
+                        <div
+                          key={`task-subject-${idx}`}
+                          className="bg-white dark:bg-background-secondary p-2 rounded border border-accent-200 dark:border-accent-300 text-xs animate-fadeIn flex items-center cursor-pointer hover:bg-accent-50 dark:hover:bg-background-primary"
+                          onClick={() => toggleExpandTask(idx)}
+                        >
+                          <div className="flex-1 mr-1 truncate">{subject}</div>
+                          {/* Expand icon */}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="text-accent-500"
+                          >
+                            <path
+                              d="M15 3H21V9"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M9 21H3V15"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M21 3L14 10"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M3 21L10 14"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {!isUser && message.chat_id !== undefined && (
           <div className="mb-1 text-sm text-accent-700 dark:text-accent-700 font-semibold">
             {message.subject ? message.subject : `Chat ${message.chat_id + 1}`}

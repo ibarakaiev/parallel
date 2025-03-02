@@ -124,8 +124,9 @@ async def messages_endpoint(request: Request):
                     print("FinalResponseCapture initialized")
                 
                 async def send_event(self, event: StreamEvent):
-                    # Log all events for debugging
-                    print(f"Event received: {event.event_type}, task_id: {event.task_id}, metadata: {event.metadata}")
+                    # Log all events for debugging - but don't print content chunks in non-streaming mode
+                    if event.event_type != StreamEventType.CONTENT_CHUNK:
+                        print(f"Event received: {event.event_type}, task_id: {event.task_id}, metadata: {event.metadata}")
                     
                     # Capture decomposition results
                     if event.event_type == StreamEventType.THINKING_END and event.metadata.get("thinking_step") == 1:
