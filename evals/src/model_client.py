@@ -1,16 +1,12 @@
 import time
 import httpx
 from datetime import datetime
-from anthropic import AsyncAnthropic
 from .types import ModelResponse
-import logging
-
-logger = logging.getLogger(__name__)
 
 class ModelClient:
-    def __init__(self, fastapi_url: str, anthropic_api_key: str):
-        self.fastapi_url = fastapi_url
-        self.anthropic_client = AsyncAnthropic(api_key=anthropic_api_key)
+    def __init__(self, fastapi_endpoint: str = 'http://localhost:4000/chat', anthropic_api_key: str = None):
+        self.fastapi_endpoint = fastapi_endpoint
+        self.anthropic_api_key = anthropic_api_key
         self.client = httpx.AsyncClient(timeout=30.0)
 
     async def query_branchial_model(self, question: str) -> ModelResponse:
@@ -18,7 +14,7 @@ class ModelClient:
         
         try:
             response = await self.client.post(
-                self.fastapi_url,
+                self.fastapi_endpoint,
                 json={"message": question}
             )
             data = response.json()
@@ -31,7 +27,7 @@ class ModelClient:
                 usage=data.get("usage", {})
             )
         except Exception as e:
-            logger.error(f"Error in FastAPI request: {str(e)}")
+            print(f"Error in FastAPI request: {str(e)}")
             return ModelResponse(
                 model_id="Model A",
                 response="Error: Request failed",
@@ -44,31 +40,35 @@ class ModelClient:
         start_time = time.time()
         
         try:
-            response = await self.anthropic_client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=1024,
-                temperature=0.7,
-                messages=[{"role": "user", "content": question}]
+            response = await self.client.post(
+                'https://api.anthropic.com/v1/messages',
+                headers={
+                    'x-api-key': self.anthropic_api_key,
+                    'anthropic-version': '2023-06-01'
+                },
+                json={
+                    'model': 'claude-3-haiku-20240307',
+                    'max_tokens': 1024,
+                    'messages': [{'role': 'user', 'content': question}]
+                }
             )
+            data = response.json()
             
             return ModelResponse(
                 model_id="Model B",
-                response=response.content[0].text,
+                response=data.get("content", [{}])[0].get("text", "No response"),
                 latency=(time.time() - start_time) * 1000,
                 timestamp=datetime.now(),
-                usage={
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens
-                }
+                usage=data.get("usage", {})
             )
         except Exception as e:
-            logger.error(f"Error in Anthropic request: {str(e)}")
+            print(f"Error in Anthropic request: {str(e)}")
             return ModelResponse(
                 model_id="Model B",
-                response="Error: " + str(e),
+                response="Error: Request failed",
                 latency=(time.time() - start_time) * 1000,
                 timestamp=datetime.now(),
-                usage={}
+                usage={"input_tokens": 0, "output_tokens": 0}
             )
 
     async def __aenter__(self):
