@@ -57,7 +57,7 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     stream: bool = True
     max_tokens: Optional[int] = 1024
-    model: Optional[str] = "claude-3-haiku-20240307"
+    model: Optional[str] = "claude-3-sonnett-20240307"
 
 
 @app.get("/")
@@ -98,13 +98,13 @@ async def messages_endpoint(request: Request):
         messages = request_data.get("messages", [])
         stream = request_data.get("stream", True)
         max_tokens = request_data.get("max_tokens", 1024)
-        model = request_data.get("model", "claude-3-haiku-20240307")
+        model = request_data.get("model", "claude-3-sonnett-20240307")
     else:
         # GET requests can only be for streaming
         stream = True
         messages = []
         max_tokens = 1024
-        model = "claude-3-haiku-20240307"
+        model = "claude-3-sonnett-20240307"
 
     # If not streaming, use synchronous completion
     if not stream:

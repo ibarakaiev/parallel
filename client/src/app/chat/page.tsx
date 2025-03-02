@@ -511,9 +511,9 @@ export default function ChatPage() {
       console.log("Conversation history:", updatedMessages);
 
       // Use fetch to create a streaming response
-      const apiUrl = "http://localhost:4000/v1/messages";
-      // Use Haiku model
-      const model = "anthropic.haiku-1-Claude-Haiku-20240307";
+      const apiUrl = `${process.env.API_URL}/messages`;
+      // Use Sonnet 3.7 model
+      const model = "anthropic.claude-3-sonnet-20240229";
 
       // For API requests, we need to pass the full conversation history
       // Only filter out intermediate reasoning messages but keep the proper sequential order
@@ -654,83 +654,13 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen bg-accent-50 dark:bg-accent-50">
-      {/* Sidebar */}
-      <div className="w-64 border-r border-accent-200 dark:border-accent-300 bg-white dark:bg-background-secondary hidden sm:block">
-        <div className="h-14 border-b border-accent-200 dark:border-accent-300 px-4 flex items-center">
-          <h1 className="text-lg font-bold text-accent-900 dark:text-accent-900 font-serif">
-            Parallel
-          </h1>
-        </div>
-        <div className="p-3">
-          <button className="flex items-center px-3 py-2 text-sm text-accent-900 dark:text-accent-900 rounded bg-accent-100 dark:bg-accent-100 w-full justify-between group font-sans">
-            <div className="flex items-center gap-2">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="text-accent-700 dark:text-accent-700"
-              >
-                <path
-                  d="M13.5 3H2.5C2.22386 3 2 3.22386 2 3.5V12.5C2 12.7761 2.22386 13 2.5 13H13.5C13.7761 13 14 12.7761 14 12.5V3.5C14 3.22386 13.7761 3 13.5 3Z"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M2 6H14"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M5.5 9.5H10.5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Chat</span>
-            </div>
-          </button>
-        </div>
-      </div>
-
       {/* Main content */}
       <div className="flex-1 flex flex-col">
         <header className="h-14 border-b border-accent-200 dark:border-accent-300 bg-white dark:bg-background-secondary flex items-center justify-between px-4">
           <div className="flex items-center gap-3">
-            <button className="sm:hidden p-1 rounded hover:bg-accent-100 dark:hover:bg-accent-200">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="text-accent-900 dark:text-accent-900"
-              >
-                <path
-                  d="M3 6H21"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M3 12H21"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M3 18H21"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
+            <h1 className="text-lg font-bold text-accent-900 dark:text-accent-900 font-serif">
+              Parallel
+            </h1>
           </div>
 
           <div className="flex items-center gap-2">
